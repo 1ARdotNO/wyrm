@@ -51,6 +51,10 @@ enum Command {
         /// Emit findings as JSON instead of text.
         #[arg(long)]
         json: bool,
+        /// Extra rules file to add to the bundled catalogue (defaults to
+        /// `.threatmodel/rules.yaml` if present).
+        #[arg(long)]
+        rules: Option<PathBuf>,
     },
     /// Render a Mermaid data-flow diagram to stdout.
     Diagram(Targets),
@@ -104,7 +108,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             targets,
             fail_on,
             json,
-        } => cmd_analyze(&resolve(&targets.paths)?, fail_on.threshold(), json),
+            rules,
+        } => cmd_analyze(&resolve(&targets.paths)?, fail_on.threshold(), json, rules),
         Command::Diagram(t) => cmd_diagram(&resolve(&t.paths)?),
     }
 }
@@ -295,8 +300,30 @@ fn cmd_validate(files: &[PathBuf]) -> Result<ExitCode, String> {
     })
 }
 
-fn cmd_analyze(files: &[PathBuf], fail_on: Severity, json: bool) -> Result<ExitCode, String> {
-    let lib = otm_core::ThreatLibrary::bundled();
+const RULES_FILE: &str = "rules.yaml";
+
+fn cmd_analyze(
+    files: &[PathBuf],
+    fail_on: Severity,
+    json: bool,
+    rules: Option<PathBuf>,
+) -> Result<ExitCode, String> {
+    let mut lib = otm_core::ThreatLibrary::bundled();
+
+    // Extend with a user catalogue: an explicit --rules file, else
+    // .threatmodel/rules.yaml if it exists.
+    let extra = rules.or_else(|| {
+        let default = PathBuf::from(DEFAULT_DIR).join(RULES_FILE);
+        default.is_file().then_some(default)
+    });
+    if let Some(path) = extra {
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let custom = otm_core::ThreatLibrary::from_yaml(&text)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        lib.rules.extend(custom.rules);
+    }
+
     let mut all: Vec<Finding> = Vec::new();
     for file in files {
         let otm = otm_core::parse_file(file).map_err(|e| e.to_string())?;

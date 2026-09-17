@@ -87,7 +87,7 @@ pub struct Finding {
 
 /// The default catalogue, embedded at build time so the CLI and WASM builds are
 /// self-contained. Override with [`ThreatLibrary::from_yaml`].
-const DEFAULT_LIBRARY: &str = include_str!("../../../threats/library.yaml");
+const DEFAULT_LIBRARY: &str = include_str!("../threats/library.yaml");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreatLibrary {

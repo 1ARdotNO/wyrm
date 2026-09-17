@@ -35,8 +35,15 @@ jobs:
           - { os: macos-latest, target: x86_64-apple-darwin }
     steps:
       - uses: actions/checkout@v7
-      - uses: taiki-e/upload-rust-binary-action@v1
+      - name: wyrm CLI
+        uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: wyrm
+          target: ${{ matrix.target }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: wyrm-lsp language server
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: wyrm-lsp
           target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}

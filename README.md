@@ -94,7 +94,7 @@ editors/vscode       VS Code extension (LSP client) → wyrm-lsp
 editors/obsidian     Obsidian plugin: renders ```otm blocks (otm-core via WASM)
 editors/obsidian/wasm  otm-core compiled to WebAssembly
 editors/intellij     IntelliJ/JetBrains plugin scaffold (LSP4IJ) → wyrm-lsp
-threats/library.yaml the STRIDE rule catalogue (data, adapted from OWASP pytm)
+crates/otm-core/threats/library.yaml   the STRIDE rule catalogue (adapted from pytm)
 docs/                GitHub Pages site + DETECTION.md
 .threatmodel/        this repo's own model (dogfood)
 ```

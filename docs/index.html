@@ -9,6 +9,18 @@
 </head>
 <body>
 
+<nav class="nav">
+  <div class="wrap navwrap">
+    <a class="brand" href="index.html">🐉 wyrm</a>
+    <span class="navlinks">
+      <a href="index.html" class="active">Home</a>
+      <a href="index.html#getting-started">Get started</a>
+      <a href="detect.html">Auto-detection</a>
+      <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
+    </span>
+  </div>
+</nav>
+
 <header class="hero">
   <div class="wrap">
     <div class="logo">🐉 wyrm</div>
@@ -187,7 +199,13 @@ dataflows:
 
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'strict' });
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    securityLevel: 'strict',
+    flowchart: { htmlLabels: true, nodeSpacing: 60, rankSpacing: 70, useMaxWidth: true },
+    themeVariables: { fontSize: '20px' },
+  });
 </script>
 </body>
 </html>

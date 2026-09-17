@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wyrm — auto-detection guide</title>
+<meta name="description" content="wyrm init reads your infrastructure-as-code and generates a baseline threat model. Here's everything it detects and how exposure maps to the model." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap navwrap">
+    <a class="brand" href="index.html">🐉 wyrm</a>
+    <span class="navlinks">
+      <a href="index.html">Home</a>
+      <a href="index.html#getting-started">Get started</a>
+      <a href="detect.html" class="active">Auto-detection</a>
+      <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header class="subhero">
+  <div class="wrap">
+    <h1>Auto-detection</h1>
+    <p class="lede">
+      <code>wyrm init</code> reads your infrastructure-as-code and generates a
+      baseline Open Threat Model — the topology, trust boundaries, and dataflows,
+      inferred from what already describes your system. You review it and add the
+      one thing code can't know: which data is sensitive.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section>
+  <h2>How it works</h2>
+  <pre class="code">wyrm init                          # auto-detect compose in the current dir
+wyrm init --from k8s/               # a directory of Kubernetes manifests
+wyrm init --from main.tf -o -       # print to stdout
+wyrm analyze                        # then find the threats in the baseline</pre>
+  <p>It writes <code>.threatmodel/&lt;project&gt;.otm.yaml</code>. Two principles guide
+  every rule:</p>
+  <ul class="principles">
+    <li><strong>Defaults favor exposure.</strong> If a load balancer's <code>internal</code>
+      flag is absent, it's treated as internet-facing — because that's the provider default.
+      wyrm errs toward flagging exposure, not hiding it.</li>
+    <li><strong>A WAF is a mitigation, not a wall.</strong> Detecting Cloudflare, Cloud Armor,
+      or a Next-Gen WAF attaches a control to the ingress flow and <em>downgrades</em> the
+      finding — it never makes it disappear. Detect-only rules (<code>action = "log"</code>)
+      don't count.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>What it detects</h2>
+  <p>Status: <span class="pill ok">shipped</span> <span class="pill wip">building</span> <span class="pill soon">planned</span></p>
+
+  <h3>Docker Compose <span class="pill ok">shipped</span></h3>
+  <table class="cmp">
+    <thead><tr><th>Signal</th><th>Becomes</th></tr></thead>
+    <tbody>
+      <tr><td>service</td><td>component (type inferred from image)</td></tr>
+      <tr><td>published <code>ports</code></td><td>internet ingress dataflow</td></tr>
+      <tr><td><code>depends_on</code></td><td>dataflow between services</td></tr>
+      <tr><td>image is postgres/mysql/redis/…</td><td>database / data-store in a data tier</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Kubernetes &amp; Istio <span class="pill wip">building</span></h3>
+  <table class="cmp">
+    <thead><tr><th>Signal</th><th>Becomes</th></tr></thead>
+    <tbody>
+      <tr><td><code>Service</code> type LoadBalancer / NodePort</td><td>internet-facing component</td></tr>
+      <tr><td><code>Service</code> type ClusterIP</td><td>internal component</td></tr>
+      <tr><td><code>Ingress</code> (+ backends)</td><td>edge entrypoint + dataflows; <code>tls</code> → encrypted</td></tr>
+      <tr><td>Istio <code>Gateway</code> / <code>VirtualService</code></td><td>mesh edge + routing dataflows</td></tr>
+      <tr><td><code>loadBalancerSourceRanges</code></td><td>mitigation (source-IP allowlist)</td></tr>
+      <tr><td><code>NetworkPolicy</code>, Istio <code>AuthorizationPolicy</code> / mTLS</td><td>trust boundary / mitigation</td></tr>
+      <tr><td>CNI: Flannel vs Calico/Cilium</td><td>whether NetworkPolicy is actually enforced</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Terraform — AWS / GCP / Azure <span class="pill soon">planned</span></h3>
+  <table class="cmp">
+    <thead><tr><th>Signal</th><th>Becomes</th></tr></thead>
+    <tbody>
+      <tr><td>AWS <code>aws_lb.internal = false</code>, API Gateway</td><td>internet-facing LB / API</td></tr>
+      <tr><td>AWS <code>aws_security_group</code> ingress <code>0.0.0.0/0</code></td><td>world-open port</td></tr>
+      <tr><td>GCP <code>forwarding_rule</code> <code>EXTERNAL*</code>, public GKE</td><td>internet exposure</td></tr>
+      <tr><td>GCP <code>iap {}</code>, <code>master_authorized_networks</code></td><td>mitigation (auth / allowlist)</td></tr>
+      <tr><td>Azure public <code>frontend_ip_configuration</code>, <code>azurerm_public_ip</code></td><td>internet-facing frontend</td></tr>
+      <tr><td>VPC / VNet / subnets</td><td>trust zones</td></tr>
+    </tbody>
+  </table>
+
+  <h3>WAF, DDoS &amp; mesh VPN <span class="pill soon">planned</span></h3>
+  <table class="cmp">
+    <thead><tr><th>Signal</th><th>Becomes</th></tr></thead>
+    <tbody>
+      <tr><td>Cloudflare managed/custom WAF, rate limiting, bot management</td><td>mitigation (mode: block vs log)</td></tr>
+      <tr><td>Fastly WAF / Next-Gen WAF (Signal Sciences)</td><td>mitigation (+ coverage %)</td></tr>
+      <tr><td>AWS WAFv2 &amp; Shield, GCP Cloud Armor, Azure WAF &amp; DDoS</td><td>mitigation on the ingress flow</td></tr>
+      <tr><td>Tailscale tailnet / subnet router</td><td>private trust zone (not internet-exposed)</td></tr>
+      <tr><td><code>tailscale funnel</code></td><td>deliberate internet exposure</td></tr>
+    </tbody>
+  </table>
+  <p class="note">The full signal→OTM mapping, with exact resource/attribute names, lives in
+  <a href="https://github.com/1ARdotNO/wyrm/blob/main/docs/DETECTION.md">DETECTION.md</a>.
+  Want a source wyrm doesn't cover yet? <a href="https://github.com/1ARdotNO/wyrm/issues/12">Issue #12</a> tracks the roadmap.</p>
+</section>
+
+<section>
+  <h2>What it can't detect (you add these)</h2>
+  <p>A generated baseline captures <em>structure</em>. It cannot know <em>sensitivity</em> —
+  which flows carry PII, credentials, or regulated data. That's the review step: open the
+  generated model, add <code>assets</code> with confidentiality ratings and attach them to the
+  right components and dataflows, then re-run <code>wyrm analyze</code>. The topology is the
+  90% wyrm does for you; the sensitivity is the 10% only you know.</p>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · MIT
+  </div>
+</footer>
+</body>
+</html>

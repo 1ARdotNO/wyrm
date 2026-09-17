@@ -1,0 +1,44 @@
+# Builds the TypeScript/JS editor extensions so dependency bumps (which Renovate
+# automerges) can't silently break them — the Rust CI doesn't cover these.
+name: Editors
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: editors-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  editors-build:
+    name: editors-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: VS Code extension — typecheck & build
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Obsidian plugin — build (wasm + bundle)
+        working-directory: editors/obsidian
+        run: |
+          npm ci
+          npm run build

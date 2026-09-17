@@ -7,6 +7,7 @@
 //! exactly once.
 
 pub mod generate;
+pub mod migrate;
 pub mod model;
 pub mod render;
 pub mod rules;

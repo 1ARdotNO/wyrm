@@ -58,6 +58,23 @@ enum Command {
     },
     /// Render a Mermaid data-flow diagram to stdout.
     Diagram(Targets),
+    /// Import a threat model from another tool (Threagile, pytm).
+    Import {
+        /// Source format.
+        #[arg(long, value_enum)]
+        from: ImportFormat,
+        /// File to import (Threagile YAML, or pytm `--json` output).
+        file: PathBuf,
+        /// Output path (default `.threatmodel/<name>.otm.yaml`; `-` for stdout).
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum ImportFormat {
+    Threagile,
+    Pytm,
 }
 
 #[derive(clap::Args)]
@@ -111,7 +128,48 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             rules,
         } => cmd_analyze(&resolve(&targets.paths)?, fail_on.threshold(), json, rules),
         Command::Diagram(t) => cmd_diagram(&resolve(&t.paths)?),
+        Command::Import { from, file, output } => cmd_import(from, file, output),
     }
+}
+
+fn cmd_import(
+    from: ImportFormat,
+    file: PathBuf,
+    output: Option<PathBuf>,
+) -> Result<ExitCode, String> {
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let otm = match from {
+        ImportFormat::Threagile => otm_core::migrate::from_threagile(&text),
+        ImportFormat::Pytm => otm_core::migrate::from_pytm(&text),
+    }
+    .map_err(|e| e.to_string())?;
+
+    let body = otm_core::to_yaml(&otm).map_err(|e| e.to_string())?;
+    let doc = format!(
+        "# Imported by `wyrm import` from {}.\n# Review, add mitigations, then `wyrm analyze`.\n{body}",
+        file.display()
+    );
+
+    if matches!(output.as_deref(), Some(p) if p.as_os_str() == "-") {
+        print!("{doc}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let dest = output.unwrap_or_else(|| {
+        PathBuf::from(DEFAULT_DIR).join(format!("{}.otm.yaml", sanitize_filename(&otm.project.id)))
+    });
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    std::fs::write(&dest, &doc).map_err(|e| format!("{}: {e}", dest.display()))?;
+    eprintln!(
+        "Imported {} — {} components, {} dataflows → {}.",
+        file.display(),
+        otm.components.len(),
+        otm.dataflows.len(),
+        dest.display()
+    );
+    eprintln!("Next: review it, then `wyrm analyze`.");
+    Ok(ExitCode::SUCCESS)
 }
 
 const COMPOSE_CANDIDATES: &[&str] = &[

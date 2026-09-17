@@ -31,6 +31,9 @@ infrastructure**.
   merges reviewer edits, and gates on severity.
 - **AI skill** — a [`skill/`](skill) that teaches Claude, GitHub Copilot, and ChatGPT
   to use wyrm and author/fix OTM models. [Setup →](https://1ardotno.github.io/wyrm/ai.html)
+- **Migrate in** — `wyrm import --from threagile|pytm <file>` converts existing
+  [Threagile](https://threagile.io) models or [pytm](https://github.com/OWASP/pytm)
+  `--json` exports to OTM. Come as you are.
 
 ## Install
 

@@ -13,6 +13,6 @@ name = "wyrm"
 path = "src/main.rs"
 
 [dependencies]
-otm-core.workspace = true
+otm-core = { workspace = true, features = ["terraform"] }
 clap.workspace = true
 serde_json.workspace = true

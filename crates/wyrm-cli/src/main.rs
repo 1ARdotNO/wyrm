@@ -144,7 +144,9 @@ fn cmd_init(
     });
 
     let text = read_source(&source)?;
-    let mut otm = if looks_like_k8s(&text) {
+    let mut otm = if looks_like_terraform(&text) {
+        otm_core::generate::from_terraform(&text, &project)
+    } else if looks_like_k8s(&text) {
         otm_core::generate::from_manifests(&text, &project)
     } else {
         otm_core::generate::from_compose(&text, &project)
@@ -208,32 +210,46 @@ fn sanitize_filename(s: &str) -> String {
         .collect()
 }
 
-/// Read a source file, or concatenate every YAML file in a directory (a manifest
-/// dir) into one multi-document stream.
+/// Read a source file, or concatenate a directory into one stream. A directory of
+/// Terraform (`.tf`) is preferred (joined with newlines); otherwise YAML files are
+/// joined as a multi-document manifest stream.
 fn read_source(source: &Path) -> Result<String, String> {
     if !source.is_dir() {
         return std::fs::read_to_string(source).map_err(|e| format!("{}: {e}", source.display()));
     }
-    let mut files: Vec<PathBuf> = std::fs::read_dir(source)
-        .map_err(|e| format!("{}: {e}", source.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.is_file()
-                && matches!(
-                    p.extension().and_then(|x| x.to_str()),
-                    Some("yaml") | Some("yml")
-                )
-        })
-        .collect();
-    files.sort();
-    if files.is_empty() {
-        return Err(format!("no .yaml/.yml files in {}", source.display()));
+
+    let gather = |exts: &[&str]| -> Result<Vec<PathBuf>, String> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(source)
+            .map_err(|e| format!("{}: {e}", source.display()))?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.is_file()
+                    && p.extension()
+                        .and_then(|x| x.to_str())
+                        .is_some_and(|x| exts.contains(&x))
+            })
+            .collect();
+        files.sort();
+        Ok(files)
+    };
+
+    let concat = |files: Vec<PathBuf>, sep: &str| -> Result<String, String> {
+        let mut parts = Vec::new();
+        for f in files {
+            parts.push(std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?);
+        }
+        Ok(parts.join(sep))
+    };
+
+    let tf = gather(&["tf"])?;
+    if !tf.is_empty() {
+        return concat(tf, "\n");
     }
-    let mut parts = Vec::new();
-    for f in files {
-        parts.push(std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?);
+    let yaml = gather(&["yaml", "yml"])?;
+    if !yaml.is_empty() {
+        return concat(yaml, "\n---\n");
     }
-    Ok(parts.join("\n---\n"))
+    Err(format!("no .tf/.yaml/.yml files in {}", source.display()))
 }
 
 /// Heuristic: does this look like Kubernetes/Istio manifests vs a compose file?
@@ -241,6 +257,16 @@ fn looks_like_k8s(text: &str) -> bool {
     text.lines()
         .map(str::trim_start)
         .any(|l| l.starts_with("apiVersion:") || l.starts_with("kind:"))
+}
+
+/// Heuristic: does this look like Terraform (HCL)?
+fn looks_like_terraform(text: &str) -> bool {
+    text.lines().map(str::trim_start).any(|l| {
+        l.starts_with("resource \"")
+            || l.starts_with("provider \"")
+            || l.starts_with("module \"")
+            || l.starts_with("terraform {")
+    })
 }
 
 fn cmd_validate(files: &[PathBuf]) -> Result<ExitCode, String> {

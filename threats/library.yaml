@@ -1,0 +1,78 @@
+# wyrm threat library — STRIDE rules over the OTM graph.
+#
+# Adapted from OWASP pytm's threat library (MIT-licensed). pytm expresses each
+# threat as a Python condition over its DFD; here the equivalent conditions use
+# wyrm's typed predicate vocabulary (see crates/otm-core/src/rules.rs). Grow this
+# file freely — it is data, and CI re-validates it against the schema on change.
+rules:
+  - id: WYRM-T001
+    name: Sensitive data crosses a trust boundary in cleartext
+    stride: InformationDisclosure
+    severity: critical
+    target: dataflow
+    when:
+      - kind: crossesTrustBoundary
+      - kind: notEncrypted
+      - kind: carriesSensitiveData
+        minConfidentiality: 70
+    description: >-
+      A dataflow carrying confidential data leaves one trust zone for another
+      without transport encryption, exposing it to interception on the wire.
+    mitigation: Enforce TLS (or mTLS between services) on this flow; tag it `tls`/`https` once encrypted.
+
+  - id: WYRM-T002
+    name: Unencrypted flow across a trust boundary
+    stride: Tampering
+    severity: high
+    target: dataflow
+    when:
+      - kind: crossesTrustBoundary
+      - kind: notEncrypted
+    description: >-
+      Traffic leaving a trust zone without encryption can be read or modified in
+      transit, enabling tampering even when the payload is not itself sensitive.
+    mitigation: Terminate the flow over TLS and verify server (and ideally client) identity.
+
+  - id: WYRM-T003
+    name: Internet-facing component handling sensitive data
+    stride: InformationDisclosure
+    severity: high
+    target: component
+    when:
+      - kind: lowTrustZone
+        maxTrust: 30
+      - kind: carriesSensitiveData
+        minConfidentiality: 70
+    description: >-
+      A component in a low-trust (internet-exposed) zone processes or stores
+      confidential data, making it a high-value target for direct compromise.
+    mitigation: Move sensitive processing to a higher-trust zone, or add strong authN/Z and input validation at the edge.
+
+  - id: WYRM-T004
+    name: Datastore without an authentication boundary
+    stride: ElevationOfPrivilege
+    severity: high
+    target: component
+    when:
+      - kind: componentKindIn
+        kinds: ["database", "datastore", "data-store"]
+      - kind: lowTrustZone
+        maxTrust: 40
+    description: >-
+      A datastore sits in a low-trust zone. Datastores reached without a
+      hardened auth boundary invite privilege escalation and bulk data theft.
+    mitigation: Place the datastore in a private zone; require authenticated, least-privilege access only.
+
+  - id: WYRM-T005
+    name: External entity flow lacks authentication
+    stride: Spoofing
+    severity: medium
+    target: dataflow
+    when:
+      - kind: crossesTrustBoundary
+      - kind: carriesSensitiveData
+        minConfidentiality: 40
+    description: >-
+      A cross-boundary flow moves data of note but the model records no proof of
+      peer identity, so either endpoint could be impersonated (spoofed).
+    mitigation: Authenticate both ends of the flow (tokens, mutual TLS) and record the control as a mitigation.

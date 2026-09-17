@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+*.log
+.DS_Store
+.env
+
+# MegaLinter reports
+megalinter-reports/
+trivy-results.sarif

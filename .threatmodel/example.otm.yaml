@@ -1,0 +1,72 @@
+# Example threat model. wyrm scans `.threatmodel/*.otm.yaml` by default so models
+# live in-repo, next to the code they protect.
+otmVersion: 0.2.0
+
+project:
+  id: example
+  name: Example Web App
+  owner: security@example.com
+  description: Minimal model exercising wyrm's boundary and encryption rules.
+
+trustZones:
+  - id: tz-internet
+    name: Internet
+    risk:
+      trustRating: 10
+  - id: tz-dmz
+    name: DMZ
+    risk:
+      trustRating: 50
+  - id: tz-private
+    name: Private Network
+    risk:
+      trustRating: 80
+
+assets:
+  - id: asset-credentials
+    name: User Credentials
+    risk:
+      confidentiality: 100
+      integrity: 100
+      availability: 50
+
+components:
+  - id: browser
+    name: User Browser
+    type: external-entity
+    parent:
+      trustZone: tz-internet
+  - id: web-app
+    name: Web Application
+    type: web-service
+    parent:
+      trustZone: tz-dmz
+    assets:
+      processed:
+        - asset-credentials
+  - id: auth-db
+    name: Auth Database
+    type: database
+    parent:
+      trustZone: tz-private
+    assets:
+      stored:
+        - asset-credentials
+
+dataflows:
+  # Cleartext + crosses internet->DMZ + carries credentials -> trips WYRM-T001 (critical).
+  - id: df-login
+    name: Submit login
+    source: browser
+    destination: web-app
+    assets:
+      - asset-credentials
+  # Encrypted DMZ->private flow -> must NOT trip the cleartext/encryption rules.
+  - id: df-lookup
+    name: Verify credentials
+    source: web-app
+    destination: auth-db
+    assets:
+      - asset-credentials
+    tags:
+      - tls

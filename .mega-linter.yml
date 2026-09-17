@@ -1,0 +1,12 @@
+# cargo (fmt + clippy) already gates Rust in CI, so MegaLinter covers everything
+# else: YAML, Markdown, JSON, GitHub Actions, and secret scanning.
+APPLY_FIXES: none
+DISABLE:
+  - RUST
+DISABLE_LINTERS:
+  - REPOSITORY_CHECKOV
+  - REPOSITORY_DEVSKIM
+  - SPELL_CSPELL
+SHOW_ELAPSED_TIME: true
+FILEIO_REPORTER: false
+PRINT_ALPACA: false

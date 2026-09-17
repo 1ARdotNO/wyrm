@@ -1,0 +1,17 @@
+name: Feature request
+description: Suggest an idea — a new rule, predicate, output format, or client.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to model or detect that wyrm can't yet?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: false

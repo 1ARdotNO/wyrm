@@ -3,8 +3,8 @@
 // (no JDK/Gradle); pin versions to your toolchain and verify the LSP4IJ API.
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "2.0.21"
-    id("org.jetbrains.intellij.platform") version "2.1.0"
+    id("org.jetbrains.kotlin.jvm") version "2.4.20"
+    id("org.jetbrains.intellij.platform") version "2.19.0"
 }
 
 group = "dev.wyrm"

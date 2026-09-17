@@ -28,6 +28,8 @@ infrastructure**.
   out. All share the same engine.
 - **CI integration** — prebuilt release binaries + a PR workflow that regenerates,
   merges reviewer edits, and gates on severity.
+- **AI skill** — a [`skill/`](skill) that teaches Claude, GitHub Copilot, and ChatGPT
+  to use wyrm and author/fix OTM models. [Setup →](https://1ardotno.github.io/wyrm/ai.html)
 
 ## Install
 

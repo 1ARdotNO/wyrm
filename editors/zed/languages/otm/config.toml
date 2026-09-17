@@ -1,0 +1,6 @@
+name = "OTM"
+grammar = "yaml"
+# Only wyrm's models, so the language server never attaches to plain YAML.
+path_suffixes = ["otm.yaml", "otm.yml"]
+line_comments = ["# "]
+tab_size = 2

@@ -18,6 +18,7 @@
       <a href="detect.html">Auto-detection</a>
       <a href="editors.html">Editors</a>
       <a href="ai.html">AI</a>
+      <a href="index.html#rules">Rules</a>
       <a href="index.html#ci">CI</a>
       <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
     </span>
@@ -47,8 +48,10 @@
 
 <section id="see">
   <h2>See it work</h2>
-  <p>This model — three trust zones, a cleartext login flow — is a real
-  <code>.threatmodel/example.otm.yaml</code>. Wyrm renders the diagram and finds the flaws.</p>
+  <p>A real <code>.threatmodel/shop.otm.yaml</code> — a checkout across four trust zones. Wyrm
+  renders the data-flow diagram and finds the flaws; the flagged flows light up
+  <span style="color:#ff5c6c">red</span> (critical) and <span style="color:#ffd24d">amber</span>
+  (medium), and the session cache is flagged for sitting in the DMZ.</p>
 
   <div class="two">
     <div class="panel">
@@ -56,30 +59,43 @@
       <pre class="mermaid">
 flowchart LR
   subgraph tz_internet["Internet"]
-    browser["User Browser"]
+    browser["Browser"]
   end
   subgraph tz_dmz["DMZ"]
-    web_app["Web Application"]
+    gateway["API Gateway"]
+    cache["Session Cache"]
   end
   subgraph tz_private["Private Network"]
-    auth_db["Auth Database"]
+    orders["Orders Service"]
+    payments["Payments Service"]
   end
-  browser -->|"Submit login"| web_app
-  web_app -->|"Verify credentials"| auth_db
+  subgraph tz_data["Data Tier"]
+    db["Orders DB"]
+  end
+  browser -->|"Submit order"| gateway
+  gateway -->|"Place order"| orders
+  orders -->|"Charge card"| payments
+  orders -->|"Persist order"| db
+  gateway -->|"Read session"| cache
+  classDef flagged stroke:#ff5c6c,stroke-width:2px;
+  class cache flagged
+  linkStyle 0 stroke:#ff5c6c,stroke-width:3px
+  linkStyle 1,3 stroke:#ffd24d,stroke-width:2px
       </pre>
     </div>
 
     <div class="panel">
       <div class="panel-head">STRIDE findings &nbsp;·&nbsp; <code>wyrm analyze</code></div>
       <div class="term">
-<span class="line"><span class="b crit">CRIT</span> <span class="dim">InformationDisclosure</span> Sensitive data crosses a trust boundary in cleartext <span class="dim">(Submit login)</span></span>
-<span class="sub">WYRM-T001 — confidential data leaves one trust zone for another without transport encryption.</span>
-<span class="fix">↳ Enforce TLS (or mTLS) on this flow; tag it <code>tls</code>/<code>https</code> once encrypted.</span>
-<span class="line"><span class="b high">HIGH</span> <span class="dim">Tampering</span> Unencrypted flow across a trust boundary <span class="dim">(Submit login)</span></span>
-<span class="sub">WYRM-T002 — traffic leaving a trust zone unencrypted can be read or modified in transit.</span>
-<span class="line"><span class="b med">MED</span> <span class="dim">Spoofing</span> External entity flow lacks authentication <span class="dim">(Submit login)</span></span>
-<span class="line"><span class="b med">MED</span> <span class="dim">Spoofing</span> External entity flow lacks authentication <span class="dim">(Verify credentials)</span></span>
-<span class="done">4 finding(s). — exits non-zero on HIGH+, failing the build.</span>
+<span class="line"><span class="b crit">CRIT</span> <span class="dim">InformationDisclosure</span> Sensitive data crosses a boundary in cleartext <span class="dim">(Submit order)</span></span>
+<span class="sub">WYRM-T001 — PII + card data leave the internet zone for the DMZ unencrypted.</span>
+<span class="fix">↳ Enforce TLS on this flow; tag it <code>tls</code>/<code>https</code> once encrypted.</span>
+<span class="line"><span class="b high">HIGH</span> <span class="dim">Tampering</span> Unencrypted flow across a trust boundary <span class="dim">(Submit order)</span></span>
+<span class="line"><span class="b high">HIGH</span> <span class="dim">ElevationOfPrivilege</span> Datastore without an auth boundary <span class="dim">(Session Cache)</span></span>
+<span class="sub">WYRM-T004 — the cache sits in the DMZ; move it to a private zone.</span>
+<span class="line"><span class="b med">MED</span> <span class="dim">Spoofing</span> External entity flow lacks authentication <span class="dim">(Submit order)</span></span>
+<span class="line"><span class="dim">… + 2 more medium (Place order, Persist order)</span></span>
+<span class="done">6 finding(s). — exits non-zero on HIGH+, failing the build.</span>
       </div>
     </div>
   </div>
@@ -103,6 +119,11 @@ flowchart LR
   <ol class="steps">
     <li>
       <h3>Install the CLI</h3>
+      <p>Grab a prebuilt binary from the <a href="https://github.com/1ARdotNO/wyrm/releases">releases</a> — no toolchain needed:</p>
+      <pre class="code"># Linux x86_64
+curl -sSL https://github.com/1ARdotNO/wyrm/releases/latest/download/wyrm-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+# macOS: wyrm-aarch64-apple-darwin.tar.gz (Apple Silicon) · wyrm-x86_64-apple-darwin.tar.gz (Intel)</pre>
+      <p>Or build from source with Cargo:</p>
       <pre class="code">cargo install --git https://github.com/1ARdotNO/wyrm wyrm-cli</pre>
     </li>
     <li>
@@ -194,6 +215,33 @@ jobs:
   adds the mitigation (a <code>tls</code> tag, an auth control, a top-level mitigation), and pushes —
   the next run merges their edit, the finding clears, and the check goes green. No drawing, no separate
   tool: the threat model rides along with the change.</p>
+</section>
+
+<section id="rules">
+  <h2>Extend the rules</h2>
+  <p>The STRIDE catalogue is <strong>data</strong>, not code — add your own rules without
+  recompiling. A rule is a target, a set of predicates (AND-ed), and a finding:</p>
+  <pre class="code"># .threatmodel/rules.yaml
+rules:
+  - id: ACME-001
+    name: Databases must not sit in an internet-facing zone
+    stride: ElevationOfPrivilege
+    severity: critical
+    target: component            # or: dataflow
+    when:
+      - kind: componentKindIn
+        kinds: [database]
+      - kind: lowTrustZone
+        maxTrust: 60
+    description: Company policy ACME-001.
+    mitigation: Move the database to the data tier (trustRating &gt;= 70).</pre>
+  <p>Predicates include <code>crossesTrustBoundary</code>, <code>notEncrypted</code>,
+  <code>carriesSensitiveData</code>, <code>componentKindIn</code>, and <code>lowTrustZone</code>.</p>
+  <p><strong>CLI:</strong> <code>wyrm analyze --rules rules.yaml</code> — or just drop the file at
+  <code>.threatmodel/rules.yaml</code> and it's picked up automatically.</p>
+  <p><strong>CI (declarative):</strong> commit <code>.threatmodel/rules.yaml</code> and the same
+  <code>wyrm analyze</code> in your pipeline loads it — org-wide policies gate every PR with no
+  extra flags.</p>
 </section>
 
 <section id="why">

@@ -106,6 +106,40 @@ npm run build     # needs wasm-pack: cargo install wasm-pack</pre></li>
 
 </main>
 
+<section id="lsp-editors">
+  <h2>Neovim, Emacs, Sublime &amp; any LSP editor <span class="pill ok">shipped</span></h2>
+  <p>Every editor with an LSP client can use <code>wyrm-lsp</code> — the universal recipe is
+  "run <code>wyrm-lsp</code> over stdio, scoped to <code>*.otm.yaml</code>." Drop-in configs live in
+  <a href="https://github.com/1ARdotNO/wyrm/tree/main/editors/lsp"><code>editors/lsp/</code></a>.</p>
+
+  <h3>Neovim (0.11+)</h3>
+  <pre class="code">vim.filetype.add({ pattern = { [".*%.otm%.ya?ml"] = "yaml.otm" } })
+vim.lsp.config.wyrm = { cmd = { "wyrm-lsp" }, filetypes = { "yaml.otm" },
+  root_markers = { ".threatmodel", ".git" } }
+vim.lsp.enable("wyrm")</pre>
+
+  <h3>Emacs (Eglot)</h3>
+  <pre class="code">(define-derived-mode wyrm-otm-mode yaml-ts-mode "OTM")
+(add-to-list 'auto-mode-alist '("\\.otm\\.ya?ml\\'" . wyrm-otm-mode))
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs '(wyrm-otm-mode . ("wyrm-lsp"))))
+(add-hook 'wyrm-otm-mode-hook #'eglot-ensure)</pre>
+
+  <h3>Sublime Text (LSP package)</h3>
+  <p>Copy <code>OTM.sublime-syntax</code> to <code>Packages/User/</code>, then merge into LSP settings:</p>
+  <pre class="code">{ "clients": { "wyrm": { "enabled": true, "command": ["wyrm-lsp"], "selector": "source.yaml.otm" } } }</pre>
+
+  <h3>JetBrains family</h3>
+  <p>GoLand, PyCharm, WebStorm, RubyMine, Rider, and the rest are all covered by the
+  <a href="#intellij">IntelliJ plugin</a> above — it's a platform plugin, so it loads across the
+  whole family.</p>
+
+  <h3>Helix &amp; anything else</h3>
+  <p>Point any LSP client at <code>wyrm-lsp</code> (stdio) for <code>*.otm.yaml</code>. Full snippets
+  (incl. Helix <code>languages.toml</code>) in
+  <a href="https://github.com/1ARdotNO/wyrm/tree/main/editors/lsp"><code>editors/lsp/</code></a>.</p>
+</section>
+
 <footer>
   <div class="wrap">
     <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · MIT

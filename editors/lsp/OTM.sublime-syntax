@@ -1,0 +1,11 @@
+%YAML 1.2
+---
+# Gives *.otm.yaml the scope `source.yaml.otm` (inheriting YAML highlighting) so
+# the Sublime LSP client can target just threat models. Copy to Packages/User/.
+name: OTM
+scope: source.yaml.otm
+version: 2
+extends: Packages/YAML/YAML.sublime-syntax
+file_extensions:
+  - otm.yaml
+  - otm.yml

@@ -24,8 +24,9 @@ infrastructure**.
   topology without clobbering your mitigations). [Detection matrix →](docs/DETECTION.md)
 - **Editors** — [Zed](editors/zed) and [VS Code](editors/vscode) extensions give
   live diagnostics via `wyrm-lsp`; an [Obsidian plugin](editors/obsidian) renders
-  `otm` blocks inline; an [IntelliJ](editors/intellij) scaffold (LSP4IJ) rounds it
-  out. All share the same engine.
+  `otm` blocks inline; an [IntelliJ](editors/intellij) plugin (LSP4IJ) covers the
+  JetBrains family; and [`editors/lsp`](editors/lsp) has drop-in configs for
+  Neovim, Emacs, Sublime, Helix — any LSP editor. All share the same engine.
 - **CI integration** — prebuilt release binaries + a PR workflow that regenerates,
   merges reviewer edits, and gates on severity.
 - **AI skill** — a [`skill/`](skill) that teaches Claude, GitHub Copilot, and ChatGPT

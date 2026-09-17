@@ -46,12 +46,14 @@ section { padding: 46px 0; border-bottom: 1px solid var(--line); }
 h2 { font-size: 27px; margin: 0 0 14px; }
 h3 { font-size: 18px; margin: 0 0 8px; }
 
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 20px; }
-@media (max-width: 760px) { .two { grid-template-columns: 1fr; } .hero h1 { font-size: 32px; } }
+/* Stack full-width so the diagram is large and readable. */
+.two { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 20px; }
+@media (max-width: 760px) { .hero h1 { font-size: 32px; } }
 
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .panel-head { padding: 10px 14px; background: var(--panel2); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--dim); }
-.panel .mermaid { margin: 0; padding: 18px; }
+.panel .mermaid { margin: 0 auto; padding: 24px; text-align: center; }
+.panel .mermaid svg { max-width: 100%; height: auto; }
 
 .term { padding: 16px; font-size: 12.5px; white-space: pre-wrap; line-height: 1.9; }
 .term .line { display: block; }
@@ -97,5 +99,22 @@ table.cmp { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 
 .road .ok { color: var(--ok); }
 .road .soon { color: var(--med); }
 .lic { color: var(--dim); font-size: 14px; }
+
+/* Top nav (multi-page) */
+.nav { border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 10; }
+.navwrap { display: flex; align-items: center; justify-content: space-between; height: 52px; }
+.brand { font-weight: 700; color: var(--ink); }
+.navlinks a { color: var(--dim); margin-left: 18px; font-size: 14px; }
+.navlinks a.active, .navlinks a:hover { color: var(--accent); }
+.subhero { border-bottom: 1px solid var(--line); padding: 40px 0 26px; background: radial-gradient(900px 300px at 30% -20%, #1b2740 0%, var(--bg) 70%); }
+.subhero h1 { font-size: 34px; margin: 0 0 10px; }
+
+.pill { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 1px 7px; border-radius: 4px; vertical-align: middle; }
+.pill.ok { background: #143d22; color: var(--ok); }
+.pill.wip { background: #3d3413; color: var(--med); }
+.pill.soon { background: #2a3340; color: var(--dim); }
+.principles { padding-left: 20px; }
+.principles li { margin: 8px 0; }
+.note { color: var(--dim); font-size: 14px; }
 
 footer { padding: 26px 0; color: var(--dim); font-size: 14px; text-align: center; }

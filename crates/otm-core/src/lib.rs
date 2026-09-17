@@ -6,6 +6,7 @@
 //! plugin via WASM) is a thin shell over this crate — the analysis lives here
 //! exactly once.
 
+pub mod canvas;
 pub mod generate;
 pub mod migrate;
 pub mod model;

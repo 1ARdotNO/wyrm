@@ -5,67 +5,110 @@
 _The dragon, evolved — threat models as code._
 
 wyrm takes OWASP Threat Dragon's mission (accessible, developer-friendly threat
-modeling) and moves it into your codebase. Instead of a drag-and-drop canvas in a
-separate app, a threat model is a plain [Open Threat Model (OTM)][otm] file in the
-repo — versioned, diff-reviewable, and enforced in CI. wyrm parses it, validates
-it, runs a STRIDE rule engine over it, and renders a data-flow diagram from it.
+modeling) and moves it into your codebase. A threat model is a plain
+[Open Threat Model (OTM)][otm] file in the repo — versioned, diff-reviewable, and
+enforced in CI. wyrm parses it, validates it, runs a STRIDE rule engine over it,
+renders a data-flow diagram from it, and can **generate a baseline from your
+infrastructure**.
+
+📖 **Docs & live demo: https://1ardotno.github.io/wyrm/** · [What it auto-detects](https://1ardotno.github.io/wyrm/detect.html)
+
+## Features
+
+- **OTM engine** — parse/validate OTM (YAML or JSON), a data-driven STRIDE rule
+  engine, and Mermaid diagram generation. One Rust core, shared everywhere.
+- **CLI** — `wyrm init | validate | analyze | diagram`. `analyze` exits non-zero on
+  HIGH+ findings, so it drops straight into CI.
+- **Auto-detection** — `wyrm init` builds a baseline model from **docker-compose**
+  or **Kubernetes/Istio** manifests, and **reconciles** on re-run (regenerates the
+  topology without clobbering your mitigations). [Detection matrix →](docs/DETECTION.md)
+- **Editors** — a [Zed extension](editors/zed) and an [Obsidian plugin](editors/obsidian)
+  give live diagnostics / inline rendering via the same engine. VS Code & IntelliJ planned.
+- **CI integration** — prebuilt release binaries + a PR workflow that regenerates,
+  merges reviewer edits, and gates on severity.
+
+## Install
+
+```sh
+# From source
+cargo install --git https://github.com/1ARdotNO/wyrm wyrm-cli
+
+# Or grab a prebuilt binary
+curl -sSL https://github.com/1ARdotNO/wyrm/releases/latest/download/wyrm-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+```
+
+## Quickstart
+
+```sh
+# Generate a baseline from your infrastructure
+wyrm init                       # auto-detects docker-compose in the cwd
+wyrm init --from k8s/           # a directory of Kubernetes/Istio manifests
+
+# Review the generated .threatmodel/<project>.otm.yaml, add asset sensitivity, then:
+wyrm analyze                    # STRIDE findings; exits non-zero on HIGH+ (the CI gate)
+wyrm analyze --fail-on critical # loosen the gate
+wyrm diagram                    # Mermaid data-flow diagram
+wyrm validate                   # structural checks only
+```
+
+Re-running `wyrm init` **merges** — the topology refreshes from infra while your
+assets, mitigations, and `tls`/control tags are preserved (`--force` to overwrite).
+That's what makes the CI loop safe: regenerate on every push, keep the reviewer's
+mitigations, fail the check only on unresolved HIGH+ findings. See the
+[CI example](https://1ardotno.github.io/wyrm/#ci).
+
+## Writing a model
+
+```yaml
+otmVersion: 0.2.0
+project: { id: shop, name: Shop }
+trustZones:
+  - { id: tz-net, name: Internet, risk: { trustRating: 10 } }
+  - { id: tz-db,  name: Private,  risk: { trustRating: 80 } }
+assets:
+  - { id: pii, name: Customer PII, risk: { confidentiality: 100 } }
+components:
+  - { id: api, name: API, type: web-service, parent: { trustZone: tz-net }, assets: { processed: [pii] } }
+  - { id: db,  name: DB,  type: database,    parent: { trustZone: tz-db } }
+dataflows:
+  - { id: save, name: Save profile, source: api, destination: db, assets: [pii], tags: [tls] }
+```
+
+## Repository layout
 
 ```
-.threatmodel/example.otm.yaml   ← your model, next to the code it protects
+crates/otm-core      the engine: OTM model, validation, STRIDE rules, Mermaid,
+                     and the infra importers (generate/{compose,kubernetes})
+crates/wyrm-cli      the `wyrm` binary — a thin shell over otm-core
+crates/wyrm-lsp      language server (diagnostics) — powers the editor plugins
+editors/zed          Zed extension (WASM) → wyrm-lsp
+editors/obsidian     Obsidian plugin: renders ```otm blocks (otm-core via WASM)
+editors/obsidian/wasm  otm-core compiled to WebAssembly
+threats/library.yaml the STRIDE rule catalogue (data, adapted from OWASP pytm)
+docs/                GitHub Pages site + DETECTION.md
+.threatmodel/        this repo's own model (dogfood)
 ```
 
-## Why not just use …?
+**The golden rule:** analysis logic lives in `otm-core` exactly once. The CLI, the
+LSP, the Zed extension, and the Obsidian plugin (via WASM) are all thin clients.
+
+## Why not just use…?
 
 | | Editing | Storage format | In-repo / CI gate | Engine |
 |---|---|---|---|---|
-| **Threat Dragon** | GUI canvas | tool-specific JSON (geometry-coupled) | no | manual |
+| **Threat Dragon** | GUI canvas | tool-specific JSON | no | manual |
 | **pytm** | Python program | imperative `.py` | partial | Python threat lib |
-| **wyrm** | your editor (text) | **OTM** (YAML/JSON, tool-agnostic) | **yes** | Rust, data-driven rules |
-
-OTM is a published, platform-independent standard, so a wyrm model isn't locked to
-wyrm. The STRIDE rule catalogue is **data** (`threats/library.yaml`), adapted from
-pytm's threat library — grow it without recompiling.
-
-## Install / build
-
-```sh
-cargo build --release
-./target/release/wyrm --help
-```
-
-## Use
-
-```sh
-wyrm validate                     # structural checks over .threatmodel/
-wyrm analyze                      # run STRIDE rules; exits non-zero on HIGH+ (CI gate)
-wyrm analyze --fail-on critical   # loosen the gate
-wyrm analyze --json               # machine-readable findings
-wyrm diagram                      # emit a Mermaid data-flow diagram
-```
-
-`analyze` is designed to drop straight into CI: it exits non-zero when a finding
-meets `--fail-on` (default `high`), failing the build on a real design flaw.
-
-## Architecture
-
-One Rust core, many thin clients — the analysis exists exactly once:
-
-- **`otm-core`** — OTM parsing, validation, the STRIDE rule engine, and Mermaid
-  rendering. The whole product.
-- **`wyrm-cli`** — the `wyrm` binary (this repo).
-- **Zed extension** _(planned)_ — a language server wrapping `otm-core` for
-  in-editor completion and diagnostics on `*.otm.yaml`.
-- **Obsidian plugin** _(planned)_ — `otm-core` compiled to WASM, with a JSON
-  Canvas ↔ OTM bridge so you can draw the model visually.
+| **wyrm** | your editor (text) | **OTM** (YAML/JSON) | **yes** | Rust, data-driven rules |
 
 ## Convention
 
-Store models in **`.threatmodel/`** at the repo root, named `*.otm.yaml`
-(or `.otm.json`). They live with the code and travel with it.
+Store models in **`.threatmodel/`** at the repo root, named `*.otm.yaml` (or
+`.otm.json`). They live with the code and travel with it.
 
 ## License
 
-MIT. Threat rules adapted from [OWASP pytm][pytm] (MIT).
+MIT. STRIDE rules adapted from [OWASP pytm][pytm] (MIT). Diagrams by [Mermaid][mermaid].
 
 [otm]: https://github.com/iriusrisk/OpenThreatModel
 [pytm]: https://github.com/OWASP/pytm
+[mermaid]: https://mermaid.js.org/

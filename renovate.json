@@ -23,6 +23,27 @@
     "labels": ["security"],
     "automerge": true
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track the tree-sitter grammar commit pinned by the Zed extension.",
+      "fileMatch": ["^editors/zed/extension\\.toml$"],
+      "matchStrings": [
+        "repository\\s*=\\s*\"https://github\\.com/(?<depName>[^\"]+)\"\\s*[\\r\\n]+\\s*commit\\s*=\\s*\"(?<currentDigest>[a-f0-9]+)\""
+      ],
+      "currentValueTemplate": "master",
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/{{{depName}}}"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the Mermaid version loaded from the jsDelivr CDN in the docs.",
+      "fileMatch": ["^docs/.+\\.html$"],
+      "matchStrings": ["cdn\\.jsdelivr\\.net/npm/mermaid@(?<currentValue>[0-9.]+)/"],
+      "depNameTemplate": "mermaid",
+      "datasourceTemplate": "npm"
+    }
+  ],
   "packageRules": [
     {
       "description": "Heavy automerge for everything — the CI suite (fmt + clippy -Dwarnings + tests + cargo-deny + CodeQL + Trivy) is the safety net, so anything that stays green merges itself.",
@@ -33,6 +54,11 @@
       "description": "Group all GitHub Actions bumps into one PR.",
       "matchManagers": ["github-actions"],
       "groupName": "github-actions"
+    },
+    {
+      "description": "Automerge the custom-managed grammar/CDN bumps too.",
+      "matchManagers": ["custom.regex"],
+      "automerge": true
     }
   ]
 }

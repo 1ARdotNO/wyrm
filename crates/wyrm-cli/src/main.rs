@@ -58,14 +58,25 @@ enum Command {
     },
     /// Render a Mermaid data-flow diagram to stdout.
     Diagram(Targets),
-    /// Import a threat model from another tool (Threagile, pytm).
+    /// Import a threat model from another tool (Threagile, pytm, JSON Canvas).
     Import {
         /// Source format.
         #[arg(long, value_enum)]
         from: ImportFormat,
-        /// File to import (Threagile YAML, or pytm `--json` output).
+        /// File to import (Threagile YAML, pytm `--json`, or a `.canvas` file).
         file: PathBuf,
         /// Output path (default `.threatmodel/<name>.otm.yaml`; `-` for stdout).
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+    /// Export a model to another format (JSON Canvas).
+    Export {
+        /// Target format.
+        #[arg(long, value_enum)]
+        to: ExportFormat,
+        #[command(flatten)]
+        targets: Targets,
+        /// Output path (`-` for stdout).
         #[arg(long, short)]
         output: Option<PathBuf>,
     },
@@ -75,6 +86,12 @@ enum Command {
 enum ImportFormat {
     Threagile,
     Pytm,
+    Canvas,
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum ExportFormat {
+    Canvas,
 }
 
 #[derive(clap::Args)]
@@ -129,7 +146,32 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         } => cmd_analyze(&resolve(&targets.paths)?, fail_on.threshold(), json, rules),
         Command::Diagram(t) => cmd_diagram(&resolve(&t.paths)?),
         Command::Import { from, file, output } => cmd_import(from, file, output),
+        Command::Export {
+            to,
+            targets,
+            output,
+        } => cmd_export(to, &resolve(&targets.paths)?, output),
     }
+}
+
+fn cmd_export(
+    to: ExportFormat,
+    files: &[PathBuf],
+    output: Option<PathBuf>,
+) -> Result<ExitCode, String> {
+    let file = files.first().ok_or("no model to export")?;
+    let otm = otm_core::parse_file(file).map_err(|e| e.to_string())?;
+    let out = match to {
+        ExportFormat::Canvas => otm_core::canvas::from_otm(&otm).map_err(|e| e.to_string())?,
+    };
+    if matches!(output.as_deref(), Some(p) if p.as_os_str() == "-") {
+        println!("{out}");
+    } else {
+        let dest = output.unwrap_or_else(|| file.with_extension("").with_extension("canvas"));
+        std::fs::write(&dest, &out).map_err(|e| format!("{}: {e}", dest.display()))?;
+        eprintln!("Wrote {}.", dest.display());
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn cmd_import(
@@ -141,6 +183,7 @@ fn cmd_import(
     let otm = match from {
         ImportFormat::Threagile => otm_core::migrate::from_threagile(&text),
         ImportFormat::Pytm => otm_core::migrate::from_pytm(&text),
+        ImportFormat::Canvas => otm_core::canvas::to_otm(&text),
     }
     .map_err(|e| e.to_string())?;
 

@@ -1,0 +1,39 @@
+{
+  "name": "wyrm",
+  "displayName": "Wyrm",
+  "description": "Threat modeling that lives with your code — live OTM validation and STRIDE diagnostics.",
+  "version": "0.1.0",
+  "publisher": "1ARdotNO",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/1ARdotNO/wyrm" },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Linters", "Programming Languages"],
+  "activationEvents": ["onLanguage:yaml", "workspaceContains:**/*.otm.yaml"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Wyrm",
+      "properties": {
+        "wyrm.serverPath": {
+          "type": "string",
+          "default": "wyrm-lsp",
+          "description": "Path to the wyrm-lsp language server binary."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --format=cjs --outfile=dist/extension.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.24",
+    "typescript": "^5.6"
+  }
+}

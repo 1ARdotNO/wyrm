@@ -28,7 +28,7 @@ cargo run --bin wyrm -- validate    # dogfood
 
 ## Adding a threat rule
 
-Most new detections need **no Rust** — add an entry to `threats/library.yaml`
+Most new detections need **no Rust** — add an entry to `crates/otm-core/threats/library.yaml`
 using the existing predicate vocabulary. Only touch `otm-core/src/rules.rs` when
 you need a genuinely new predicate, and add a test in
 `crates/otm-core/tests/analysis.rs` that proves it fires (and that a safe model

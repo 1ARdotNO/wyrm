@@ -7,6 +7,8 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+keywords = ["threat-modeling", "lsp", "language-server", "security", "otm"]
+categories = ["development-tools"]
 
 [[bin]]
 name = "wyrm-lsp"

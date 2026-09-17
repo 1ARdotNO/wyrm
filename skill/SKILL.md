@@ -75,7 +75,7 @@ mitigations:                      # controls a reviewer adds
 
 ## The STRIDE rules
 
-`analyze` fires these (catalogue in `threats/library.yaml`):
+`analyze` fires these (catalogue in `crates/otm-core/threats/library.yaml`):
 
 | Rule | Severity | Fires when |
 |---|---|---|

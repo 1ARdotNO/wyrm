@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wyrm — editor setup</title>
+<meta name="description" content="Install the wyrm editor integrations: Zed, VS Code, IntelliJ, and Obsidian. Live OTM validation and STRIDE diagnostics as you type." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap navwrap">
+    <a class="brand" href="index.html">🐉 wyrm</a>
+    <span class="navlinks">
+      <a href="index.html">Home</a>
+      <a href="index.html#getting-started">Get started</a>
+      <a href="detect.html">Auto-detection</a>
+      <a href="editors.html" class="active">Editors</a>
+      <a href="index.html#ci">CI</a>
+      <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header class="subhero">
+  <div class="wrap">
+    <h1>Editor setup</h1>
+    <p class="lede">
+      Open a <code>*.otm.yaml</code> file and see structural + STRIDE findings inline as
+      you type. The editor integrations all speak to the same engine — the CLI, your
+      editor, and CI never disagree.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section id="lsp">
+  <h2>First: the language server</h2>
+  <p>Zed, VS Code, and IntelliJ are thin clients over <code>wyrm-lsp</code>. Install it once,
+  on your PATH:</p>
+  <pre class="code">cargo install --git https://github.com/1ARdotNO/wyrm wyrm-lsp</pre>
+  <p class="note">Obsidian is the exception — it bundles the engine as WebAssembly, so it
+  needs no binary.</p>
+</section>
+
+<section id="zed">
+  <h2>Zed <span class="pill ok">shipped</span></h2>
+  <ol class="steps">
+    <li><h3>Install the dev extension</h3>
+      <p>Command palette (<code>Cmd-Shift-P</code>) → <strong>zed: install dev extension</strong> →
+      select <code>editors/zed</code>. Zed compiles it (needs the <code>wasm32-wasip2</code> target:
+      <code>rustup target add wasm32-wasip2</code>).</p></li>
+    <li><h3>Open a model</h3>
+      <p>Open any <code>.otm.yaml</code> — the WYRM findings appear inline and in the Problems
+      panel (<code>Cmd-Shift-M</code>).</p></li>
+  </ol>
+  <p class="note">Diagnostics not showing? Launch Zed from a terminal so it inherits your
+  PATH (with <code>~/.cargo/bin</code>), or restart it after installing Rust.</p>
+</section>
+
+<section id="vscode">
+  <h2>VS Code <span class="pill ok">shipped</span></h2>
+  <ol class="steps">
+    <li><h3>Build the extension</h3>
+      <pre class="code">cd editors/vscode
+npm install
+npm run build</pre></li>
+    <li><h3>Run it</h3>
+      <p>Press <code>F5</code> to launch an Extension Development Host, or package with
+      <code>npx @vscode/vsce package</code> and install the <code>.vsix</code>.</p></li>
+    <li><h3>Open a model</h3>
+      <p>Open a <code>.otm.yaml</code> file. Point <code>wyrm.serverPath</code> at your
+      <code>wyrm-lsp</code> in Settings if it isn't on PATH.</p></li>
+  </ol>
+</section>
+
+<section id="intellij">
+  <h2>IntelliJ / JetBrains <span class="pill wip">scaffold</span></h2>
+  <p>Uses <a href="https://github.com/redhat-developer/lsp4ij">LSP4IJ</a> for the LSP
+  integration. This one ships as a scaffold — build it with a JDK 17+ and verify the
+  LSP4IJ API against your platform version.</p>
+  <pre class="code">cd editors/intellij
+./gradlew runIde        # sandbox IDE with the plugin
+./gradlew buildPlugin   # build/distributions/*.zip</pre>
+  <p class="note">Install the LSP4IJ plugin in your IDE, and keep <code>wyrm-lsp</code> on PATH.</p>
+</section>
+
+<section id="obsidian">
+  <h2>Obsidian <span class="pill ok">shipped</span></h2>
+  <ol class="steps">
+    <li><h3>Build the plugin</h3>
+      <pre class="code">cd editors/obsidian
+npm install
+npm run build     # needs wasm-pack: cargo install wasm-pack</pre></li>
+    <li><h3>Install into your vault</h3>
+      <p>Copy <code>manifest.json</code>, <code>main.js</code>, and <code>styles.css</code> into
+      <code>&lt;vault&gt;/.obsidian/plugins/wyrm/</code> and enable it.</p></li>
+    <li><h3>Use it</h3>
+      <p>Write an <code>otm</code> fenced code block in any note — wyrm renders the data-flow
+      diagram and STRIDE findings below it. No binary needed (bundled WASM engine).</p></li>
+  </ol>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · MIT
+  </div>
+</footer>
+</body>
+</html>

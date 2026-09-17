@@ -1,19 +1,12 @@
-//! Generate a baseline OTM model from infrastructure files.
+//! Baseline model from a docker-compose file.
 //!
-//! Infra-as-code encodes the system topology wyrm wants: services become
-//! components, published ports become an internet boundary crossing, `depends_on`
-//! becomes a dataflow. What it can't know — asset sensitivity, encryption — is
-//! left for a human (or an LLM pass) to annotate. The result is a *starting
-//! point*, not a finished threat model.
+//! Services become components (type inferred from image), published ports become
+//! an internet boundary crossing, `depends_on` becomes a dataflow.
 
-use crate::model::{Component, Dataflow, Otm, Parent, Project, TrustRisk, TrustZone};
+use super::*;
+use crate::model::{Component, Dataflow, Otm, Parent, Project};
 use serde::Deserialize;
 use std::collections::BTreeMap;
-
-const TZ_INTERNET: &str = "tz-internet";
-const TZ_INTERNAL: &str = "tz-internal";
-const TZ_DATA: &str = "tz-data";
-const EXTERNAL: &str = "external";
 
 #[derive(Deserialize)]
 struct Compose {
@@ -42,17 +35,17 @@ pub fn from_compose(yaml: &str, project_name: &str) -> Result<Otm, crate::Error>
 
     for (name, svc) in &compose.services {
         let id = sanitize_id(name);
-        let kind = classify(svc.image.as_deref());
+        let kind = classify_image(svc.image.as_deref());
         let is_store = is_datastore(&kind);
         has_db |= is_store;
-        let zone = if is_store { TZ_DATA } else { TZ_INTERNAL };
+        let zone_id = if is_store { TZ_DATA } else { TZ_INTERNAL };
 
         components.push(Component {
             id: id.clone(),
             name: name.clone(),
             kind,
             parent: Some(Parent {
-                trust_zone: Some(zone.to_string()),
+                trust_zone: Some(zone_id.to_string()),
                 component: None,
             }),
             assets: Default::default(),
@@ -62,7 +55,15 @@ pub fn from_compose(yaml: &str, project_name: &str) -> Result<Otm, crate::Error>
         // A published host port means the service is reachable from outside.
         if !svc.ports.is_empty() {
             has_edge = true;
-            dataflows.push(edge_flow(&id, name));
+            dataflows.push(Dataflow {
+                id: format!("df-ingress-{id}"),
+                name: format!("external request to {name}"),
+                source: EXTERNAL.to_string(),
+                destination: id.clone(),
+                assets: Vec::new(),
+                attributes: Default::default(),
+                tags: Vec::new(),
+            });
         }
 
         for dep in depends_on(&svc.depends_on) {
@@ -82,25 +83,13 @@ pub fn from_compose(yaml: &str, project_name: &str) -> Result<Otm, crate::Error>
     let mut trust_zones = Vec::new();
     if has_edge {
         trust_zones.push(zone(TZ_INTERNET, "Internet", 10));
-        // Synthetic external client so ingress flows cross a real boundary.
-        components.push(Component {
-            id: EXTERNAL.to_string(),
-            name: "External client".to_string(),
-            kind: "external-entity".to_string(),
-            parent: Some(Parent {
-                trust_zone: Some(TZ_INTERNET.to_string()),
-                component: None,
-            }),
-            assets: Default::default(),
-            attributes: Default::default(),
-        });
+        components.push(external_actor());
     }
     trust_zones.push(zone(TZ_INTERNAL, "Internal Network", 70));
     if has_db {
         trust_zones.push(zone(TZ_DATA, "Data Tier", 85));
     }
 
-    // Deterministic output regardless of the compose map's iteration order.
     components.sort_by(|a, b| a.id.cmp(&b.id));
     dataflows.sort_by(|a, b| a.id.cmp(&b.id));
 
@@ -124,30 +113,8 @@ pub fn from_compose(yaml: &str, project_name: &str) -> Result<Otm, crate::Error>
     })
 }
 
-fn edge_flow(id: &str, name: &str) -> Dataflow {
-    Dataflow {
-        id: format!("df-ingress-{id}"),
-        name: format!("external request to {name}"),
-        source: EXTERNAL.to_string(),
-        destination: id.to_string(),
-        assets: Vec::new(),
-        attributes: Default::default(),
-        tags: Vec::new(),
-    }
-}
-
-fn zone(id: &str, name: &str, trust: u8) -> TrustZone {
-    TrustZone {
-        id: id.to_string(),
-        name: name.to_string(),
-        risk: Some(TrustRisk {
-            trust_rating: Some(trust),
-        }),
-    }
-}
-
 /// Infer an OTM component type from a container image reference.
-fn classify(image: Option<&str>) -> String {
+fn classify_image(image: Option<&str>) -> String {
     let img = image.unwrap_or_default().to_lowercase();
     const DATABASES: &[&str] = &[
         "postgres",
@@ -183,10 +150,6 @@ fn classify(image: Option<&str>) -> String {
     }
 }
 
-fn is_datastore(kind: &str) -> bool {
-    matches!(kind, "database" | "data-store")
-}
-
 /// `depends_on` may be a list of names or a map of name → condition.
 fn depends_on(value: &Option<serde_yaml_ng::Value>) -> Vec<String> {
     match value {
@@ -199,20 +162,6 @@ fn depends_on(value: &Option<serde_yaml_ng::Value>) -> Vec<String> {
             .filter_map(|k| k.as_str().map(str::to_string))
             .collect(),
         _ => Vec::new(),
-    }
-}
-
-fn sanitize_id(s: &str) -> String {
-    let id: String = s
-        .trim()
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    if id.is_empty() {
-        "unnamed".to_string()
-    } else {
-        id
     }
 }
 
@@ -239,17 +188,14 @@ services:
     fn compose_becomes_a_valid_baseline() {
         let otm = from_compose(COMPOSE, "demo").unwrap();
         assert!(crate::validate::is_valid(&crate::validate(&otm)));
-        // web + api + db + synthetic external client.
         assert_eq!(otm.components.len(), 4);
         assert_eq!(otm.component("db").unwrap().kind, "database");
         assert_eq!(otm.trust_zone_of("db"), Some(TZ_DATA));
-        // Published port on web -> ingress flow from the external client.
         assert!(
             otm.dataflows
                 .iter()
                 .any(|d| d.source == EXTERNAL && d.destination == "web")
         );
-        // depends_on -> internal flows.
         assert!(
             otm.dataflows
                 .iter()
@@ -266,7 +212,6 @@ services:
     fn baseline_surfaces_findings() {
         let otm = from_compose(COMPOSE, "demo").unwrap();
         let findings = crate::ThreatLibrary::bundled().analyze(&otm);
-        // The internet -> web ingress crosses a boundary unencrypted.
         assert!(findings.iter().any(|f| f.rule_id == "WYRM-T002"));
     }
 }

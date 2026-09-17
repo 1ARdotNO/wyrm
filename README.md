@@ -24,7 +24,8 @@ infrastructure**.
   topology without clobbering your mitigations). [Detection matrix →](docs/DETECTION.md)
 - **Editors** — [Zed](editors/zed) and [VS Code](editors/vscode) extensions give
   live diagnostics via `wyrm-lsp`; an [Obsidian plugin](editors/obsidian) renders
-  `otm` blocks inline. All share the same engine. IntelliJ planned.
+  `otm` blocks inline; an [IntelliJ](editors/intellij) scaffold (LSP4IJ) rounds it
+  out. All share the same engine.
 - **CI integration** — prebuilt release binaries + a PR workflow that regenerates,
   merges reviewer edits, and gates on severity.
 
@@ -86,6 +87,7 @@ editors/zed          Zed extension (WASM) → wyrm-lsp
 editors/vscode       VS Code extension (LSP client) → wyrm-lsp
 editors/obsidian     Obsidian plugin: renders ```otm blocks (otm-core via WASM)
 editors/obsidian/wasm  otm-core compiled to WebAssembly
+editors/intellij     IntelliJ/JetBrains plugin scaffold (LSP4IJ) → wyrm-lsp
 threats/library.yaml the STRIDE rule catalogue (data, adapted from OWASP pytm)
 docs/                GitHub Pages site + DETECTION.md
 .threatmodel/        this repo's own model (dogfood)

@@ -6,6 +6,7 @@
 //! plugin via WASM) is a thin shell over this crate — the analysis lives here
 //! exactly once.
 
+pub mod generate;
 pub mod model;
 pub mod render;
 pub mod rules;
@@ -46,6 +47,11 @@ pub fn parse(text: &str) -> Result<Otm, Error> {
             }
         }
     }
+}
+
+/// Serialize an OTM model back to YAML.
+pub fn to_yaml(otm: &Otm) -> Result<String, Error> {
+    serde_yaml_ng::to_string(otm).map_err(Error::from)
 }
 
 /// Parse an OTM document from a file path.

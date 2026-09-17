@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wyrm — threat modeling that lives with your code</title>
+<meta name="description" content="Wyrm is threat-modeling-as-code: parse and validate Open Threat Model (OTM) files, run a STRIDE rule engine, and render data-flow diagrams — in your editor and in CI." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="logo">🐉 wyrm</div>
+    <h1>Threat modeling that lives with your code.</h1>
+    <p class="tag"><em>The dragon, evolved</em> — threat models as code.</p>
+    <p class="lede">
+      Wyrm takes OWASP Threat Dragon's mission and moves it into your codebase. A
+      threat model is a plain <a href="https://github.com/iriusrisk/OpenThreatModel">Open Threat Model</a>
+      file in the repo — versioned, diff-reviewable, and enforced in CI. Wyrm parses
+      it, validates it, runs a STRIDE rule engine over it, and renders a data-flow
+      diagram from it.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#getting-started">Get started</a>
+      <a class="btn" href="https://github.com/1ARdotNO/wyrm">GitHub →</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section id="see">
+  <h2>See it work</h2>
+  <p>This model — three trust zones, a cleartext login flow — is a real
+  <code>.threatmodel/example.otm.yaml</code>. Wyrm renders the diagram and finds the flaws.</p>
+
+  <div class="two">
+    <div class="panel">
+      <div class="panel-head">Rendered from the model &nbsp;·&nbsp; <code>wyrm diagram</code></div>
+      <pre class="mermaid">
+flowchart LR
+  subgraph tz_internet["Internet"]
+    browser["User Browser"]
+  end
+  subgraph tz_dmz["DMZ"]
+    web_app["Web Application"]
+  end
+  subgraph tz_private["Private Network"]
+    auth_db["Auth Database"]
+  end
+  browser -->|"Submit login"| web_app
+  web_app -->|"Verify credentials"| auth_db
+      </pre>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">STRIDE findings &nbsp;·&nbsp; <code>wyrm analyze</code></div>
+      <div class="term">
+<span class="line"><span class="b crit">CRIT</span> <span class="dim">InformationDisclosure</span> Sensitive data crosses a trust boundary in cleartext <span class="dim">(Submit login)</span></span>
+<span class="sub">WYRM-T001 — confidential data leaves one trust zone for another without transport encryption.</span>
+<span class="fix">↳ Enforce TLS (or mTLS) on this flow; tag it <code>tls</code>/<code>https</code> once encrypted.</span>
+<span class="line"><span class="b high">HIGH</span> <span class="dim">Tampering</span> Unencrypted flow across a trust boundary <span class="dim">(Submit login)</span></span>
+<span class="sub">WYRM-T002 — traffic leaving a trust zone unencrypted can be read or modified in transit.</span>
+<span class="line"><span class="b med">MED</span> <span class="dim">Spoofing</span> External entity flow lacks authentication <span class="dim">(Submit login)</span></span>
+<span class="line"><span class="b med">MED</span> <span class="dim">Spoofing</span> External entity flow lacks authentication <span class="dim">(Verify credentials)</span></span>
+<span class="done">4 finding(s). — exits non-zero on HIGH+, failing the build.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="editor">
+  <h2>In your editor</h2>
+  <p>The <a href="https://github.com/1ARdotNO/wyrm/tree/main/editors/zed">Zed extension</a>
+  runs the same engine as a language server: open a <code>*.otm.yaml</code> and findings
+  appear inline as you type. Same diagnostics in the editor and in CI — they never disagree.</p>
+  <figure class="shot">
+    <img src="assets/zed-diagnostics.svg" alt="Wyrm diagnostics inline in the Zed editor" loading="lazy" />
+    <figcaption>Inline STRIDE diagnostics in Zed. <span class="pending">(screenshot pending — see the repo's SCREENSHOTS.md)</span></figcaption>
+  </figure>
+</section>
+
+<section id="getting-started">
+  <h2>Getting started</h2>
+  <ol class="steps">
+    <li>
+      <h3>Install the CLI</h3>
+      <pre class="code">cargo install --git https://github.com/1ARdotNO/wyrm wyrm-cli</pre>
+    </li>
+    <li>
+      <h3>Add a model</h3>
+      <p>Drop a model in <code>.threatmodel/</code> at your repo root so it lives with the code:</p>
+      <pre class="code">mkdir -p .threatmodel
+$EDITOR .threatmodel/system.otm.yaml</pre>
+    </li>
+    <li>
+      <h3>Analyze &amp; diagram</h3>
+      <pre class="code">wyrm validate     # structural checks
+wyrm analyze      # STRIDE findings (exits non-zero on HIGH+)
+wyrm diagram      # Mermaid data-flow diagram</pre>
+    </li>
+    <li>
+      <h3>Gate it in CI</h3>
+      <pre class="code">- run: cargo install --git https://github.com/1ARdotNO/wyrm wyrm-cli
+- run: wyrm analyze            # fails the build on a real design flaw</pre>
+    </li>
+  </ol>
+</section>
+
+<section id="model">
+  <h2>Writing a model</h2>
+  <p>A model is OTM — trust zones, assets, components, and dataflows. Tag a flow
+  <code>tls</code> and the encryption findings clear.</p>
+  <pre class="code">otmVersion: 0.2.0
+project: { id: shop, name: Shop }
+
+trustZones:
+  - { id: tz-internet, name: Internet,  risk: { trustRating: 10 } }
+  - { id: tz-private,  name: Private,   risk: { trustRating: 80 } }
+
+assets:
+  - id: pii
+    name: Customer PII
+    risk: { confidentiality: 100, integrity: 80, availability: 50 }
+
+components:
+  - { id: api, name: API, type: web-service, parent: { trustZone: tz-internet },
+      assets: { processed: [pii] } }
+  - { id: db,  name: DB,  type: database,    parent: { trustZone: tz-private } }
+
+dataflows:
+  - { id: save, name: Save profile, source: api, destination: db,
+      assets: [pii], tags: [tls] }</pre>
+</section>
+
+<section id="why">
+  <h2>Why not just use…?</h2>
+  <table class="cmp">
+    <thead><tr><th></th><th>Editing</th><th>Storage format</th><th>In-repo / CI gate</th><th>Engine</th></tr></thead>
+    <tbody>
+      <tr><td>Threat Dragon</td><td>GUI canvas</td><td>tool-specific JSON</td><td>no</td><td>manual</td></tr>
+      <tr><td>pytm</td><td>Python program</td><td>imperative <code>.py</code></td><td>partial</td><td>Python threat lib</td></tr>
+      <tr class="me"><td><strong>wyrm</strong></td><td>your editor (text)</td><td><strong>OTM</strong> (YAML/JSON)</td><td><strong>yes</strong></td><td>Rust, data-driven rules</td></tr>
+    </tbody>
+  </table>
+  <p>OTM is a published, platform-independent standard, so a wyrm model isn't locked
+  to wyrm. The STRIDE catalogue is <em>data</em> — grow it without recompiling.</p>
+</section>
+
+<section id="roadmap">
+  <h2>Roadmap</h2>
+  <ul class="road">
+    <li><span class="ok">shipped</span> OTM core engine — parse, validate, STRIDE rules, Mermaid render</li>
+    <li><span class="ok">shipped</span> <code>wyrm</code> CLI + CI gate</li>
+    <li><span class="ok">shipped</span> <code>wyrm-lsp</code> language server</li>
+    <li><span class="ok">shipped</span> Zed extension</li>
+    <li><span class="soon">next</span> Obsidian plugin — JSON Canvas ↔ OTM, visual authoring</li>
+    <li><span class="soon">later</span> Browser sidecar editor</li>
+  </ul>
+</section>
+
+<section id="attribution">
+  <h2>Attribution</h2>
+  <ul class="attr">
+    <li><a href="https://github.com/iriusrisk/OpenThreatModel">Open Threat Model (OTM)</a> — the file format wyrm reads and writes.</li>
+    <li><a href="https://github.com/OWASP/pytm">OWASP pytm</a> (MIT) — the STRIDE threat library adapted into wyrm's rule catalogue.</li>
+    <li><a href="https://owasp.org/projects/threat-dragon">OWASP Threat Dragon</a> — the mission and inspiration.</li>
+    <li><a href="https://mermaid.js.org/">Mermaid</a> — diagram rendering on this page.</li>
+    <li><a href="https://github.com/rust-lang/rust-analyzer/tree/master/lib/lsp-server">lsp-server</a> / <a href="https://github.com/gluon-lang/lsp-types">lsp-types</a> — the language-server plumbing.</li>
+    <li>CI/security philosophy modeled on the author's <em>jync</em> project — CI as the safety net, aggressive Renovate automerge.</li>
+  </ul>
+  <p class="lic">Wyrm is MIT licensed.</p>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · MIT
+  </div>
+</footer>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'strict' });
+</script>
+</body>
+</html>

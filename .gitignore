@@ -7,3 +7,8 @@ target/
 # MegaLinter reports
 megalinter-reports/
 trivy-results.sarif
+
+# generated / deps
+**/pkg/
+node_modules/
+main.js

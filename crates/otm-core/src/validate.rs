@@ -5,15 +5,18 @@
 //! findings produced by [`crate::rules`].
 
 use crate::model::Otm;
+use serde::Serialize;
 use std::collections::BTreeSet;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
     Warning,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Diagnostic {
     pub severity: Severity,
     /// Stable machine code, e.g. `dataflow.source.unknown`.

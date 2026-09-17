@@ -100,11 +100,12 @@ LSP, the Zed extension, and the Obsidian plugin (via WASM) are all thin clients.
 
 ## Why not just use…?
 
-| | Editing | Storage format | In-repo / CI gate | Engine |
-|---|---|---|---|---|
-| **Threat Dragon** | GUI canvas | tool-specific JSON | no | manual |
-| **pytm** | Python program | imperative `.py` | partial | Python threat lib |
-| **wyrm** | your editor (text) | **OTM** (YAML/JSON) | **yes** | Rust, data-driven rules |
+| | Editing | Storage format | Model source | In-repo / CI gate | Engine |
+|---|---|---|---|---|---|
+| **Threat Dragon** | GUI canvas | tool-specific JSON | hand-drawn | no | manual |
+| **pytm** | Python program | imperative `.py` | hand-coded | partial | Python threat lib |
+| **Threagile** | text (YAML) | own YAML schema | hand-written | yes | Go rules |
+| **wyrm** | your editor (text) | **OTM** (standard) | **auto-detected + reconciled** | **yes** | Rust, data-driven |
 
 ## Convention
 

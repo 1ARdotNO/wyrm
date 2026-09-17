@@ -199,11 +199,12 @@ jobs:
 <section id="why">
   <h2>Why not just use…?</h2>
   <table class="cmp">
-    <thead><tr><th></th><th>Editing</th><th>Storage format</th><th>In-repo / CI gate</th><th>Engine</th></tr></thead>
+    <thead><tr><th></th><th>Editing</th><th>Storage format</th><th>Model source</th><th>In-repo / CI gate</th><th>Engine</th></tr></thead>
     <tbody>
-      <tr><td>Threat Dragon</td><td>GUI canvas</td><td>tool-specific JSON</td><td>no</td><td>manual</td></tr>
-      <tr><td>pytm</td><td>Python program</td><td>imperative <code>.py</code></td><td>partial</td><td>Python threat lib</td></tr>
-      <tr class="me"><td><strong>wyrm</strong></td><td>your editor (text)</td><td><strong>OTM</strong> (YAML/JSON)</td><td><strong>yes</strong></td><td>Rust, data-driven rules</td></tr>
+      <tr><td>Threat Dragon</td><td>GUI canvas</td><td>tool-specific JSON</td><td>hand-drawn</td><td>no</td><td>manual</td></tr>
+      <tr><td>pytm</td><td>Python program</td><td>imperative <code>.py</code></td><td>hand-coded</td><td>partial</td><td>Python threat lib</td></tr>
+      <tr><td>Threagile</td><td>text (YAML)</td><td>own YAML schema</td><td>hand-written</td><td>yes</td><td>Go rules</td></tr>
+      <tr class="me"><td><strong>wyrm</strong></td><td>your editor (text)</td><td><strong>OTM</strong> (standard)</td><td><strong>auto-detected + reconciled</strong></td><td><strong>yes</strong></td><td>Rust, data-driven</td></tr>
     </tbody>
   </table>
   <p>OTM is a published, platform-independent standard, so a wyrm model isn't locked

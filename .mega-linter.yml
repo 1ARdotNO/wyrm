@@ -1,16 +1,14 @@
-# cargo (fmt + clippy) already gates Rust in CI, so MegaLinter covers everything
-# else: YAML, Markdown, JSON, GitHub Actions, and secret scanning.
+# cargo (fmt+clippy), cargo-deny (deps/licenses), Trivy (vuln/secret/misconfig) and
+# CodeQL already cover Rust and security in their own workflows. MegaLinter's job is
+# only what those don't touch: workflow syntax, YAML/JSON/Markdown hygiene, and a
+# secrets sweep. Allow-list exactly those so docs CSS/HTML linters don't fight us.
 APPLY_FIXES: none
-DISABLE:
-  - RUST
-DISABLE_LINTERS:
-  - REPOSITORY_CHECKOV
-  - REPOSITORY_DEVSKIM
-  - SPELL_CSPELL
-  # zizmor needs GitHub API access to resolve `uses:` refs and 401s in CI; its job
-  # (GHA hardening) is tracked separately via SHA-pinning. actionlint still runs.
-  - ACTION_ZIZMOR
-  - REPOSITORY_TRIVY # Trivy runs as its own workflow already
+ENABLE_LINTERS:
+  - ACTION_ACTIONLINT
+  - YAML_YAMLLINT
+  - JSON_JSONLINT
+  - MARKDOWN_MARKDOWNLINT
+  - REPOSITORY_GITLEAKS
 SHOW_ELAPSED_TIME: true
 FILEIO_REPORTER: false
 PRINT_ALPACA: false

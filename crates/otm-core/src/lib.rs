@@ -29,6 +29,8 @@ pub enum Error {
     Yaml(#[from] serde_yaml_ng::Error),
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("HCL parse error: {0}")]
+    Hcl(String),
 }
 
 /// Parse an OTM document from a string, accepting either YAML or JSON.

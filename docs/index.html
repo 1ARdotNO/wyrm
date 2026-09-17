@@ -16,6 +16,7 @@
       <a href="index.html" class="active">Home</a>
       <a href="index.html#getting-started">Get started</a>
       <a href="detect.html">Auto-detection</a>
+      <a href="index.html#ci">CI</a>
       <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
     </span>
   </div>
@@ -146,6 +147,49 @@ components:
 dataflows:
   - { id: save, name: Save profile, source: api, destination: db,
       assets: [pii], tags: [tls] }</pre>
+</section>
+
+<section id="ci">
+  <h2>Run it in CI</h2>
+  <p>Pull a prebuilt binary from a <a href="https://github.com/1ARdotNO/wyrm/releases">release</a> and
+  wire wyrm into your PRs. Each push regenerates the model from your infra, <strong>merges in any
+  mitigations a reviewer added</strong> (they're never clobbered), commits the refresh back, and fails
+  the check if a high/critical finding is unresolved.</p>
+  <pre class="code">name: Threat model
+on: pull_request
+
+permissions:
+  contents: write        # to commit the refreshed model back to the PR
+
+jobs:
+  wyrm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install wyrm
+        run: |
+          curl -sSL https://github.com/1ARdotNO/wyrm/releases/latest/download/wyrm-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          mkdir -p "$HOME/.local/bin" &amp;&amp; mv wyrm "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" &gt;&gt; "$GITHUB_PATH"
+
+      - name: Refresh the threat model (keeps your mitigations)
+        run: wyrm init --from k8s/ --output .threatmodel/app.otm.yaml
+
+      - name: Commit model updates
+        run: |
+          git config user.name  "wyrm[bot]"
+          git config user.email "wyrm@users.noreply.github.com"
+          git add .threatmodel/
+          git diff --cached --quiet || { git commit -m "chore: refresh threat model"; git push; }
+
+      - name: Gate on findings
+        run: wyrm analyze .threatmodel/app.otm.yaml --fail-on high</pre>
+  <p>Make <strong>Gate on findings</strong> a required status check. The severity is configurable
+  (<code>--fail-on medium|high|critical</code>). When a finding blocks, a reviewer pulls the branch,
+  adds the mitigation (a <code>tls</code> tag, an auth control, a top-level mitigation), and pushes —
+  the next run merges their edit, the finding clears, and the check goes green. No drawing, no separate
+  tool: the threat model rides along with the change.</p>
 </section>
 
 <section id="why">

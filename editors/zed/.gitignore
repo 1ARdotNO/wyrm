@@ -1,3 +1,4 @@
-
-# Zed-generated grammar build artifacts
+target/
+extension.wasm
+*.wasm
 grammars/

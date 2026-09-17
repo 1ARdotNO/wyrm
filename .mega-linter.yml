@@ -7,6 +7,10 @@ DISABLE_LINTERS:
   - REPOSITORY_CHECKOV
   - REPOSITORY_DEVSKIM
   - SPELL_CSPELL
+  # zizmor needs GitHub API access to resolve `uses:` refs and 401s in CI; its job
+  # (GHA hardening) is tracked separately via SHA-pinning. actionlint still runs.
+  - ACTION_ZIZMOR
+  - REPOSITORY_TRIVY # Trivy runs as its own workflow already
 SHOW_ELAPSED_TIME: true
 FILEIO_REPORTER: false
 PRINT_ALPACA: false

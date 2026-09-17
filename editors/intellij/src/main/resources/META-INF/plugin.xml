@@ -1,0 +1,19 @@
+<idea-plugin>
+  <id>dev.wyrm</id>
+  <name>Wyrm</name>
+  <vendor url="https://github.com/1ARdotNO/wyrm">1ARdotNO</vendor>
+  <description><![CDATA[
+    Threat modeling that lives with your code — live OTM validation and STRIDE
+    diagnostics for <code>*.otm.yaml</code> files, via the wyrm-lsp language server.
+  ]]></description>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.redhat.devtools.lsp4ij</depends>
+
+  <extensions defaultExtensionNs="com.redhat.devtools.lsp4ij">
+    <server id="wyrm" name="Wyrm" factoryClass="dev.wyrm.WyrmLanguageServerFactory">
+      <description><![CDATA[wyrm OTM threat-model language server.]]></description>
+    </server>
+    <fileNamePatternMapping patterns="*.otm.yaml;*.otm.yml" serverId="wyrm" />
+  </extensions>
+</idea-plugin>

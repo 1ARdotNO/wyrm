@@ -148,12 +148,13 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hcl-edit"
-version = "0.8.8"
+version = "0.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88489f7cdf733b4c7798403f72d2c16fdc2b720e82c5151055f618a9b49afc1c"
+checksum = "8a67cc5751cb5996669b9780cd738d4541a76c2d5f2f10c17af4965c5a03a5f5"
 dependencies = [
  "fnv",
  "hcl-primitives",
+ "pratt",
  "vecmap-rs",
  "winnow",
 ]
@@ -173,9 +174,9 @@ dependencies = [
 
 [[package]]
 name = "hcl-rs"
-version = "0.18.7"
+version = "0.19.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48af7144c49a8db969e8a9d00cd470e1a446a3a73f6fa5eafc1eeb3d44d61ff4"
+checksum = "212c6fce17a8b9e0eab43ccf61c8bc5d2c51fc24ad52d19bd1d2be2eeba22d02"
 dependencies = [
  "hcl-edit",
  "hcl-primitives",
@@ -279,6 +280,12 @@ dependencies = [
  "serde_yaml_ng",
  "thiserror",
 ]
+
+[[package]]
+name = "pratt"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17e0a4425d076f0718b820673a38fbf3747080c61017eeb0dd79bc7e472b8bb8"
 
 [[package]]
 name = "proc-macro2"
@@ -458,9 +465,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.7.15"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
 ]

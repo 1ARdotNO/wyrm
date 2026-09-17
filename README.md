@@ -22,8 +22,9 @@ infrastructure**.
 - **Auto-detection** — `wyrm init` builds a baseline model from **docker-compose**
   or **Kubernetes/Istio** manifests, and **reconciles** on re-run (regenerates the
   topology without clobbering your mitigations). [Detection matrix →](docs/DETECTION.md)
-- **Editors** — a [Zed extension](editors/zed) and an [Obsidian plugin](editors/obsidian)
-  give live diagnostics / inline rendering via the same engine. VS Code & IntelliJ planned.
+- **Editors** — [Zed](editors/zed) and [VS Code](editors/vscode) extensions give
+  live diagnostics via `wyrm-lsp`; an [Obsidian plugin](editors/obsidian) renders
+  `otm` blocks inline. All share the same engine. IntelliJ planned.
 - **CI integration** — prebuilt release binaries + a PR workflow that regenerates,
   merges reviewer edits, and gates on severity.
 
@@ -82,6 +83,7 @@ crates/otm-core      the engine: OTM model, validation, STRIDE rules, Mermaid,
 crates/wyrm-cli      the `wyrm` binary — a thin shell over otm-core
 crates/wyrm-lsp      language server (diagnostics) — powers the editor plugins
 editors/zed          Zed extension (WASM) → wyrm-lsp
+editors/vscode       VS Code extension (LSP client) → wyrm-lsp
 editors/obsidian     Obsidian plugin: renders ```otm blocks (otm-core via WASM)
 editors/obsidian/wasm  otm-core compiled to WebAssembly
 threats/library.yaml the STRIDE rule catalogue (data, adapted from OWASP pytm)

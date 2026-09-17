@@ -1,0 +1,34 @@
+# Publishes the VS Code extension to the Marketplace. Needs a `VSCE_PAT` repo
+# secret (Azure DevOps PAT with Marketplace: Manage). Tag `vscode-X.Y.Z` or run
+# manually. No-ops loudly if the secret is missing.
+name: VS Code publish
+
+on:
+  push:
+    tags:
+      - "vscode-[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build & publish
+        working-directory: editors/vscode
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::set the VSCE_PAT repo secret (Azure DevOps PAT, Marketplace: Manage)"
+            exit 1
+          fi
+          npm ci
+          npm run build
+          npx @vscode/vsce publish

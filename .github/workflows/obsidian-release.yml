@@ -1,0 +1,49 @@
+# Publishes the Obsidian plugin. Tag `obsidian-X.Y.Z` (matching editors/obsidian
+# manifest.json) to build and attach manifest.json + main.js + styles.css to a
+# release — the assets Obsidian's community-plugins flow expects.
+name: Obsidian release
+
+on:
+  push:
+    tags:
+      - "obsidian-[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Build plugin
+        working-directory: editors/obsidian
+        run: |
+          npm ci
+          npm run build
+      - name: Verify tag matches manifest version
+        working-directory: editors/obsidian
+        run: |
+          TAG="${GITHUB_REF_NAME#obsidian-}"
+          VER=$(node -p "require('./manifest.json').version")
+          if [ "$TAG" != "$VER" ]; then
+            echo "::error::tag '$TAG' does not match manifest.json version '$VER'"
+            exit 1
+          fi
+      - name: Publish release
+        working-directory: editors/obsidian
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Obsidian $GITHUB_REF_NAME" \
+            --generate-notes \
+            manifest.json main.js styles.css

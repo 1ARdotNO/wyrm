@@ -136,6 +136,27 @@ A WAF emits an OTM `mitigation` on the ingress dataflow with a `mode` annotation
 inert. `traffic_ramp`/`percent_enabled < 100` = partial coverage — annotate, don't
 treat as full.
 
+## Reverse proxies & access control
+
+The proxy itself is just routing — **the middleware/plugin is the security signal.**
+A tunneled proxy (Pangolin, Cloudflare Tunnel) means services have *no inbound
+internet port* at all: model the authenticated edge, not a direct exposure.
+
+| Signal (grep) | Meaning | OTM mapping |
+|---|---|---|
+| Pangolin (`fossorial/pangolin`, `newt`, `gerbil`) | Tunneled reverse proxy + SSO over WireGuard; targets reached via tunnel, not direct | private zone + mitigation (authenticated ZTNA edge) |
+| Cloudflare Tunnel (`cloudflared`, `cloudflare_tunnel`, `tunnel:` ingress), `ngrok` | Outbound-only tunnel — no inbound port | mitigation (no direct exposure) |
+| Traefik / Caddy / nginx / HAProxy / Envoy | Reverse-proxy edge | edge component; look to its middleware/labels for controls |
+| Traefik `ipAllowList`/`ipWhiteList` middleware, nginx `allow`/`deny`, `loadBalancerSourceRanges`, SG CIDR | IP allowlisting | mitigation (source allowlist) |
+| Authelia, Authentik, oauth2-proxy, Keycloak, Pomerium, Ory Oathkeeper, vouch-proxy | Forward-auth / SSO in front of a service | mitigation (authentication) |
+| Traefik `forwardAuth` middleware, nginx `auth_request` | Delegated auth to an SSO proxy | mitigation (authentication) |
+| Istio `AuthorizationPolicy` `action: CUSTOM` + `provider` (ext_authz → oauth2-proxy), `RequestAuthentication` (JWT) | OAuth2 / JWT authz at the gateway | mitigation (authentication) |
+| fail2ban, CrowdSec (`crowdsec`, Traefik `bouncer` plugin) | Intrusion prevention / IP-reputation blocking | mitigation (brute-force / DoS) |
+
+**Gotcha:** a reverse proxy alone is not a control — an unauthenticated Traefik/nginx
+in front of a service adds routing, not security. Only credit a mitigation when a
+middleware (auth, ipAllowList, rate limit, CrowdSec bouncer) is actually attached.
+
 ## Sources
 
 Cloudflare WAF/Terraform, Fastly WAF & Next-Gen WAF (Terraform + Signal Sciences),

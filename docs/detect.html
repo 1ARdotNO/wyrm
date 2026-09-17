@@ -96,13 +96,17 @@ wyrm analyze                        # then find the threats in the baseline</pre
     </tbody>
   </table>
 
-  <h3>WAF, DDoS &amp; mesh VPN <span class="pill soon">planned</span></h3>
+  <h3>WAF, DDoS, reverse proxies &amp; access control <span class="pill soon">planned</span></h3>
   <table class="cmp">
     <thead><tr><th>Signal</th><th>Becomes</th></tr></thead>
     <tbody>
       <tr><td>Cloudflare managed/custom WAF, rate limiting, bot management</td><td>mitigation (mode: block vs log)</td></tr>
       <tr><td>Fastly WAF / Next-Gen WAF (Signal Sciences)</td><td>mitigation (+ coverage %)</td></tr>
       <tr><td>AWS WAFv2 &amp; Shield, GCP Cloud Armor, Azure WAF &amp; DDoS</td><td>mitigation on the ingress flow</td></tr>
+      <tr><td>Pangolin, Cloudflare Tunnel (<code>cloudflared</code>), ngrok</td><td>tunneled edge — no direct internet port + auth mitigation</td></tr>
+      <tr><td>Authelia, Authentik, oauth2-proxy, Keycloak, Pomerium; Traefik <code>forwardAuth</code></td><td>mitigation (authentication / SSO)</td></tr>
+      <tr><td>Istio oauth2 ext-authz / JWT <code>RequestAuthentication</code></td><td>mitigation (auth at the gateway)</td></tr>
+      <tr><td>fail2ban, CrowdSec; IP allowlists (Traefik <code>ipAllowList</code>, nginx allow/deny)</td><td>mitigation (intrusion prevention / source allowlist)</td></tr>
       <tr><td>Tailscale tailnet / subnet router</td><td>private trust zone (not internet-exposed)</td></tr>
       <tr><td><code>tailscale funnel</code></td><td>deliberate internet exposure</td></tr>
     </tbody>

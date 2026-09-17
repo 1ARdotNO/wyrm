@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wyrm — AI skill</title>
+<meta name="description" content="Teach Claude, GitHub Copilot, and ChatGPT to use wyrm and the OTM format — generate threat models from infra, interpret STRIDE findings, and fix them." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap navwrap">
+    <a class="brand" href="index.html">🐉 wyrm</a>
+    <span class="navlinks">
+      <a href="index.html">Home</a>
+      <a href="detect.html">Auto-detection</a>
+      <a href="editors.html">Editors</a>
+      <a href="ai.html" class="active">AI</a>
+      <a href="index.html#ci">CI</a>
+      <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header class="subhero">
+  <div class="wrap">
+    <h1>AI skill</h1>
+    <p class="lede">
+      Threat modeling is a great fit for an AI pairing — it's structured, rule-driven,
+      and mostly about turning what you know into a model. wyrm ships a skill that
+      teaches <strong>Claude</strong>, <strong>GitHub Copilot</strong>, and
+      <strong>ChatGPT</strong> how to use the tool and the OTM format, so the
+      assistant works on the same <code>.threatmodel/*.otm.yaml</code> files as your CLI,
+      editor, and CI.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section>
+  <h2>What it enables</h2>
+  <ul class="principles">
+    <li>“Generate a threat model from our <code>docker-compose.yml</code>” → the assistant
+      runs <code>wyrm init</code>, reviews the baseline, and adds asset sensitivity.</li>
+    <li>“wyrm flags <code>WYRM-T001</code> on the login flow — fix it” → it explains the
+      risk and edits the model (enforce + tag TLS).</li>
+    <li>“Add a Cloudflare WAF mitigation” → it adds a <code>mitigation</code> and wires it in.</li>
+    <li>“Is this model CI-ready?” → it runs <code>wyrm analyze --fail-on high</code> and
+      resolves what's left.</li>
+  </ul>
+  <p>The skill knows the CLI, the OTM structure, and every STRIDE rule (and how to
+  resolve each one) — the same knowledge the engine enforces.</p>
+</section>
+
+<section>
+  <h2>Install</h2>
+
+  <h3>Claude <span class="pill ok">Agent Skill</span></h3>
+  <p>Drop the skill folder where Claude looks for skills — the frontmatter
+  <code>description</code> decides when it applies.</p>
+  <pre class="code">mkdir -p ~/.claude/skills/wyrm-threat-modeling
+cp skill/SKILL.md ~/.claude/skills/wyrm-threat-modeling/</pre>
+  <p class="note">In claude.ai, paste <code>SKILL.md</code> into a Project's custom instructions.</p>
+
+  <h3>GitHub Copilot <span class="pill ok">repo instructions</span></h3>
+  <pre class="code">mkdir -p .github
+cp skill/copilot-instructions.md .github/copilot-instructions.md</pre>
+  <p class="note">Copilot Chat in that repo now understands wyrm. Or paste the file into a chat.</p>
+
+  <h3>ChatGPT <span class="pill ok">Custom GPT</span></h3>
+  <p>Create a Custom GPT (Explore GPTs → Create) and paste
+  <code>skill/chatgpt-instructions.md</code> into its Instructions. Attach
+  <code>SKILL.md</code> and <a href="https://github.com/1ARdotNO/wyrm/blob/main/docs/DETECTION.md">DETECTION.md</a>
+  as Knowledge for deeper answers.</p>
+</section>
+
+<section>
+  <h2>Where it lives</h2>
+  <p>The skill is in the repo under
+  <a href="https://github.com/1ARdotNO/wyrm/tree/main/skill"><code>skill/</code></a> —
+  one shared body of knowledge packaged for each assistant, with a README of install
+  steps. It's versioned with the tool, so the AI's knowledge tracks the engine.</p>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · MIT
+  </div>
+</footer>
+</body>
+</html>

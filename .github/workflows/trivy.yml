@@ -20,7 +20,7 @@ jobs:
 
       # Report everything to the Security tab (non-blocking).
       - name: Trivy scan (SARIF report)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scanners: vuln,secret,misconfig
@@ -35,7 +35,7 @@ jobs:
 
       # Blocking gate: fail on any fixable HIGH/CRITICAL vuln, secret, or misconfig.
       - name: Trivy scan (blocking gate)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scanners: vuln,secret,misconfig

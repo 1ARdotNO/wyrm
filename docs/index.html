@@ -89,10 +89,12 @@ flowchart LR
       <pre class="code">cargo install --git https://github.com/1ARdotNO/wyrm wyrm-cli</pre>
     </li>
     <li>
-      <h3>Add a model</h3>
+      <h3>Add a model — or generate one</h3>
       <p>Drop a model in <code>.threatmodel/</code> at your repo root so it lives with the code:</p>
       <pre class="code">mkdir -p .threatmodel
 $EDITOR .threatmodel/system.otm.yaml</pre>
+      <p>Already have a <code>docker-compose.yml</code>? Generate a baseline from your topology, then annotate it:</p>
+      <pre class="code">wyrm init            # → .threatmodel/&lt;project&gt;.otm.yaml (services, zones, flows)</pre>
     </li>
     <li>
       <h3>Analyze &amp; diagram</h3>
@@ -155,7 +157,9 @@ dataflows:
     <li><span class="ok">shipped</span> <code>wyrm</code> CLI + CI gate</li>
     <li><span class="ok">shipped</span> <code>wyrm-lsp</code> language server</li>
     <li><span class="ok">shipped</span> Zed extension</li>
-    <li><span class="soon">next</span> Obsidian plugin — JSON Canvas ↔ OTM, visual authoring</li>
+    <li><span class="ok">shipped</span> Obsidian plugin — render <code>otm</code> blocks as diagram + findings</li>
+    <li><span class="ok">shipped</span> <code>wyrm init</code> — baseline model from docker-compose</li>
+    <li><span class="soon">next</span> Obsidian JSON Canvas ↔ OTM (visual authoring)</li>
     <li><span class="soon">later</span> Browser sidecar editor</li>
   </ul>
 </section>

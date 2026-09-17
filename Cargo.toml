@@ -11,7 +11,7 @@ repository = "https://github.com/1ARdotNO/wyrm"
 authors = ["1ARdotNO"]
 
 [workspace.dependencies]
-otm-core = { path = "crates/otm-core" }
+otm-core = { path = "crates/otm-core", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Maintained fork of the archived serde_yaml — keeps the cargo-deny advisory gate green.

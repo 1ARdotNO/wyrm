@@ -1,0 +1,10 @@
+{
+  "id": "wyrm",
+  "name": "Wyrm",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Threat modeling that lives with your code. Render data-flow diagrams and STRIDE findings from Open Threat Model (OTM) blocks.",
+  "author": "1ARdotNO",
+  "authorUrl": "https://github.com/1ARdotNO/wyrm",
+  "isDesktopOnly": false
+}

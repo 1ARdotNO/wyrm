@@ -21,7 +21,7 @@ jobs:
     name: Syft SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Generate SBOM and submit to the dependency graph
         uses: anchore/sbom-action@v0
         with:

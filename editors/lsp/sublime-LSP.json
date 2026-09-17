@@ -1,7 +1,3 @@
-// Wyrm client for the Sublime Text LSP package.
-// Preferences → Package Settings → LSP → Settings, merge this into "clients".
-// Requires wyrm-lsp on PATH and the companion OTM.sublime-syntax (in this folder,
-// copy to Packages/User/) so the `source.yaml.otm` scope exists for *.otm.yaml.
 {
   "clients": {
     "wyrm": {

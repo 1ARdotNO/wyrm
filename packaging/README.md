@@ -36,7 +36,7 @@ Then anyone can `cargo install wyrm-cli`.
 
 ## VS Code Marketplace — needs `VSCE_PAT`
 
-1. Create a publisher `1ARdotNO` at https://marketplace.visualstudio.com/manage.
+1. Create a publisher `1ARdotNO` at <https://marketplace.visualstudio.com/manage>.
 2. Generate an Azure DevOps PAT (Marketplace: Manage) → add as repo secret `VSCE_PAT`.
 3. `cd editors/vscode && npm ci && npx @vscode/vsce publish` (a `vscode-*` tag can
    automate this). Optionally also publish to [OpenVSX](https://open-vsx.org) for

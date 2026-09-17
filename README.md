@@ -11,7 +11,7 @@ enforced in CI. wyrm parses it, validates it, runs a STRIDE rule engine over it,
 renders a data-flow diagram from it, and can **generate a baseline from your
 infrastructure**.
 
-📖 **Docs & live demo: https://1ardotno.github.io/wyrm/** · [What it auto-detects](https://1ardotno.github.io/wyrm/detect.html)
+📖 **Docs & live demo: <https://1ardotno.github.io/wyrm/>** · [What it auto-detects](https://1ardotno.github.io/wyrm/detect.html)
 
 ## Features
 

@@ -19,6 +19,9 @@ pub struct Diagnostic {
     /// Stable machine code, e.g. `dataflow.source.unknown`.
     pub code: String,
     pub message: String,
+    /// The id of the element this diagnostic is about, when known. Lets an editor
+    /// place the squiggle on the right line by locating the id in the source.
+    pub element: Option<String>,
 }
 
 impl Diagnostic {
@@ -27,6 +30,7 @@ impl Diagnostic {
             severity: Severity::Error,
             code: code.to_string(),
             message,
+            element: None,
         }
     }
     fn warning(code: &str, message: String) -> Self {
@@ -34,7 +38,13 @@ impl Diagnostic {
             severity: Severity::Warning,
             code: code.to_string(),
             message,
+            element: None,
         }
+    }
+    /// Attach the owning element id for source positioning.
+    fn at(mut self, id: &str) -> Self {
+        self.element = Some(id.to_string());
+        self
     }
 }
 
@@ -67,52 +77,70 @@ pub fn validate(otm: &Otm) -> Vec<Diagnostic> {
     for c in &otm.components {
         if let Some(tz) = c.parent.as_ref().and_then(|p| p.trust_zone.as_deref()) {
             if !trustzone_ids.contains(tz) {
-                out.push(Diagnostic::error(
-                    "component.trustZone.unknown",
-                    format!("component '{}' references unknown trust zone '{tz}'", c.id),
-                ));
+                out.push(
+                    Diagnostic::error(
+                        "component.trustZone.unknown",
+                        format!("component '{}' references unknown trust zone '{tz}'", c.id),
+                    )
+                    .at(&c.id),
+                );
             }
         } else if c.parent.is_none() {
-            out.push(Diagnostic::warning(
-                "component.parent.missing",
-                format!(
-                    "component '{}' has no parent trust zone; boundary analysis will skip it",
-                    c.id
-                ),
-            ));
+            out.push(
+                Diagnostic::warning(
+                    "component.parent.missing",
+                    format!(
+                        "component '{}' has no parent trust zone; boundary analysis will skip it",
+                        c.id
+                    ),
+                )
+                .at(&c.id),
+            );
         }
         for asset in c.assets.all() {
             if !asset_ids.contains(asset.as_str()) {
-                out.push(Diagnostic::error(
-                    "component.asset.unknown",
-                    format!("component '{}' references unknown asset '{asset}'", c.id),
-                ));
+                out.push(
+                    Diagnostic::error(
+                        "component.asset.unknown",
+                        format!("component '{}' references unknown asset '{asset}'", c.id),
+                    )
+                    .at(&c.id),
+                );
             }
         }
     }
 
     for df in &otm.dataflows {
         if !component_ids.contains(df.source.as_str()) {
-            out.push(Diagnostic::error(
-                "dataflow.source.unknown",
-                format!("dataflow '{}' has unknown source '{}'", df.id, df.source),
-            ));
+            out.push(
+                Diagnostic::error(
+                    "dataflow.source.unknown",
+                    format!("dataflow '{}' has unknown source '{}'", df.id, df.source),
+                )
+                .at(&df.id),
+            );
         }
         if !component_ids.contains(df.destination.as_str()) {
-            out.push(Diagnostic::error(
-                "dataflow.destination.unknown",
-                format!(
-                    "dataflow '{}' has unknown destination '{}'",
-                    df.id, df.destination
-                ),
-            ));
+            out.push(
+                Diagnostic::error(
+                    "dataflow.destination.unknown",
+                    format!(
+                        "dataflow '{}' has unknown destination '{}'",
+                        df.id, df.destination
+                    ),
+                )
+                .at(&df.id),
+            );
         }
         for asset in &df.assets {
             if !asset_ids.contains(asset.as_str()) {
-                out.push(Diagnostic::error(
-                    "dataflow.asset.unknown",
-                    format!("dataflow '{}' references unknown asset '{asset}'", df.id),
-                ));
+                out.push(
+                    Diagnostic::error(
+                        "dataflow.asset.unknown",
+                        format!("dataflow '{}' references unknown asset '{asset}'", df.id),
+                    )
+                    .at(&df.id),
+                );
             }
         }
     }
@@ -124,10 +152,9 @@ fn check_unique<'a>(out: &mut Vec<Diagnostic>, kind: &str, ids: impl Iterator<It
     let mut seen = BTreeSet::new();
     for id in ids {
         if !seen.insert(id) {
-            out.push(Diagnostic::error(
-                "id.duplicate",
-                format!("duplicate {kind} id '{id}'"),
-            ));
+            out.push(
+                Diagnostic::error("id.duplicate", format!("duplicate {kind} id '{id}'")).at(id),
+            );
         }
     }
 }

@@ -103,9 +103,16 @@ impl Builder {
 
     /// Add every managed resource in a plan/state-JSON module, keyed by its full
     /// (module-scoped) address so nested resources never collide.
-    fn resource_from_plan(&mut self, r: &StateResource) {
+    fn resource_from_plan(&mut self, r: &StateResource, module: &str) {
         let id = sanitize_id(&r.address);
         self.add_resource(&r.rtype, &id, &r.address, &r.name, Attrs::Json(&r.values));
+        // Tag the component with its module so clients can group by it.
+        if !module.is_empty() {
+            if let Some(c) = self.components.get_mut(&id) {
+                c.attributes
+                    .insert("module".to_string(), module.to_string());
+            }
+        }
     }
 
     /// Shared resource handling for both HCL and plan-JSON. `id`/`display` carry
@@ -650,6 +657,9 @@ struct StateValues {
 
 #[derive(serde::Deserialize, Default)]
 struct StateModule {
+    /// `""` for the root, `module.foo` / `module.foo.module.bar` for children.
+    #[serde(default)]
+    address: String,
     #[serde(default)]
     resources: Vec<StateResource>,
     #[serde(default)]
@@ -685,7 +695,7 @@ pub fn from_tfplan_json(text: &str, project_name: &str) -> Result<Otm, crate::Er
 fn walk_plan_module(b: &mut Builder, m: &StateModule) {
     for r in &m.resources {
         if r.mode == "managed" {
-            b.resource_from_plan(r);
+            b.resource_from_plan(r, &m.address);
         }
     }
     for c in &m.child_modules {
@@ -868,6 +878,11 @@ resource "google_container_node_pool" "np" {
         assert_eq!(
             db.parent.as_ref().unwrap().trust_zone.as_deref(),
             Some(TZ_DATA)
+        );
+        // Tagged with its module so clients can group by it.
+        assert_eq!(
+            db.attributes.get("module").map(String::as_str),
+            Some("module.data")
         );
         // The root LB is internet-facing.
         assert!(otm.dataflows.iter().any(|d| d.source == EXTERNAL));

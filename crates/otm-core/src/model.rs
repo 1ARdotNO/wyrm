@@ -175,14 +175,28 @@ pub struct Mitigation {
 
 impl Otm {
     /// Resolve the trust zone a component sits in, if declared.
+    /// The trust zone a component sits in. Walks up the `parent.component` chain
+    /// (OTM allows a component's parent to be another component) until it finds
+    /// one anchored to a zone — so nested/grouped components inherit their
+    /// container's zone. Cycle-guarded.
     pub fn trust_zone_of<'a>(&'a self, component_id: &str) -> Option<&'a str> {
-        self.components
-            .iter()
-            .find(|c| c.id == component_id)?
-            .parent
-            .as_ref()?
-            .trust_zone
-            .as_deref()
+        let mut seen = std::collections::HashSet::new();
+        let mut cur = component_id;
+        loop {
+            if !seen.insert(cur) {
+                return None; // cycle
+            }
+            let parent = self
+                .components
+                .iter()
+                .find(|c| c.id == cur)?
+                .parent
+                .as_ref()?;
+            if let Some(tz) = parent.trust_zone.as_deref() {
+                return Some(tz);
+            }
+            cur = parent.component.as_deref()?;
+        }
     }
 
     pub fn component<'a>(&'a self, id: &str) -> Option<&'a Component> {

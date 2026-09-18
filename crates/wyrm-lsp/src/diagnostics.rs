@@ -29,18 +29,21 @@ pub fn compute(text: &str) -> Vec<Diagnostic> {
             .as_deref()
             .map(|id| locate(text, id))
             .unwrap_or_default();
-        out.push(diag(range, severity, &d.code, "wyrm", d.message));
+        out.push(diag(range, severity, &d.code, "wyrm", d.message, None));
     }
 
     for f in otm_core::ThreatLibrary::bundled().analyze(&otm) {
         let range = locate(text, &f.element_id);
         let message = format!("{} — {}\n↳ {}", f.rule_id, f.title, f.mitigation);
+        // Link the diagnostic code to the rule's docs (editors show it as a link).
+        let href = format!("https://1ardotno.github.io/wyrm/rules.html#{}", f.rule_id);
         out.push(diag(
             range,
             stride_severity(f.severity),
             &f.rule_id,
             "wyrm-stride",
             message,
+            Some(href),
         ));
     }
 
@@ -53,11 +56,16 @@ fn diag(
     code: &str,
     source: &str,
     message: String,
+    href: Option<String>,
 ) -> Diagnostic {
+    let code_description = href
+        .and_then(|h| h.parse().ok())
+        .map(|href| lsp_types::CodeDescription { href });
     Diagnostic {
         range,
         severity: Some(severity),
         code: Some(NumberOrString::String(code.to_string())),
+        code_description,
         source: Some(source.to_string()),
         message,
         ..Default::default()
@@ -108,6 +116,7 @@ fn parse_error(err: &otm_core::Error) -> Diagnostic {
         "parse",
         "wyrm",
         format!("could not parse threat model: {err}"),
+        None,
     )
 }
 

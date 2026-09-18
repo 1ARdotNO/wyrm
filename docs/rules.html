@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wyrm — the STRIDE rules</title>
+<meta name="description" content="The wyrm STRIDE rule catalogue: WYRM-T001–T005, the predicates they read, how mitigations downgrade them, and how to add your own rules." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap navwrap">
+    <a class="brand" href="index.html">🐉 wyrm</a>
+    <span class="navlinks">
+      <a href="index.html">Home</a>
+      <a href="model.html">Model</a>
+      <a href="rules.html" class="active">Rules</a>
+      <a href="detect.html">Auto-detection</a>
+      <a href="editors.html">Editors</a>
+      <a href="ai.html">AI</a>
+      <a href="index.html#ci">CI</a>
+      <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header class="subhero">
+  <div class="wrap">
+    <h1>The rules</h1>
+    <p class="lede">
+      <code>wyrm analyze</code> evaluates a small, data-driven STRIDE catalogue over
+      the <a href="model.html">model graph</a>. Each rule is a set of predicates AND-ed
+      together; when they all hold for an element, it fires a finding. The catalogue is
+      <a href="https://github.com/1ARdotNO/wyrm/blob/main/crates/otm-core/threats/library.yaml">plain YAML</a>
+      — adapted from OWASP pytm — so you can grow it without recompiling.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section>
+  <h2>Catalogue</h2>
+
+  <article id="WYRM-T001" class="rule">
+    <h3>WYRM-T001 <span class="pill crit">critical</span> <span class="stride">Information Disclosure</span></h3>
+    <p><strong>Sensitive data crosses a trust boundary in cleartext.</strong> A dataflow
+    carrying confidential data leaves one trust zone for another without transport
+    encryption, exposing it to interception on the wire.</p>
+    <p class="when">Fires on a <em>dataflow</em> when: <code>crossesTrustBoundary</code>
+    · <code>notEncrypted</code> · <code>carriesSensitiveData</code> (confidentiality ≥ 70).</p>
+    <p class="fix">↳ Enforce TLS (or mTLS between services) on this flow; tag it <code>tls</code>/<code>https</code> once encrypted.</p>
+  </article>
+
+  <article id="WYRM-T002" class="rule">
+    <h3>WYRM-T002 <span class="pill high">high</span> <span class="stride">Tampering</span></h3>
+    <p><strong>Unencrypted flow across a trust boundary.</strong> Traffic leaving a trust
+    zone without encryption can be read or modified in transit, enabling tampering even
+    when the payload is not itself sensitive.</p>
+    <p class="when">Fires on a <em>dataflow</em> when: <code>crossesTrustBoundary</code> · <code>notEncrypted</code>.</p>
+    <p class="fix">↳ Terminate the flow over TLS and verify server (and ideally client) identity.</p>
+  </article>
+
+  <article id="WYRM-T003" class="rule">
+    <h3>WYRM-T003 <span class="pill high">high</span> <span class="stride">Information Disclosure</span></h3>
+    <p><strong>Internet-facing component handling sensitive data.</strong> A component in a
+    low-trust (internet-exposed) zone processes or stores confidential data, making it a
+    high-value target for direct compromise.</p>
+    <p class="when">Fires on a <em>component</em> when: <code>lowTrustZone</code> (trustRating ≤ 30)
+    · <code>carriesSensitiveData</code> (confidentiality ≥ 70).</p>
+    <p class="fix">↳ Move sensitive processing to a higher-trust zone, or add strong authN/Z and input validation at the edge.</p>
+  </article>
+
+  <article id="WYRM-T004" class="rule">
+    <h3>WYRM-T004 <span class="pill high">high</span> <span class="stride">Elevation of Privilege</span></h3>
+    <p><strong>Datastore without an authentication boundary.</strong> A datastore sits in a
+    low-trust zone. Datastores reached without a hardened auth boundary invite privilege
+    escalation and bulk data theft.</p>
+    <p class="when">Fires on a <em>component</em> when: <code>componentKindIn</code>
+    (database / datastore / data-store) · <code>lowTrustZone</code> (trustRating ≤ 40).</p>
+    <p class="fix">↳ Place the datastore in a private zone; require authenticated, least-privilege access only.</p>
+  </article>
+
+  <article id="WYRM-T005" class="rule">
+    <h3>WYRM-T005 <span class="pill med">medium</span> <span class="stride">Spoofing</span></h3>
+    <p><strong>External entity flow lacks authentication.</strong> A cross-boundary flow
+    moves data of note but the model records no proof of peer identity, so either endpoint
+    could be impersonated (spoofed).</p>
+    <p class="when">Fires on a <em>dataflow</em> when: <code>crossesTrustBoundary</code>
+    · <code>carriesSensitiveData</code> (confidentiality ≥ 40).</p>
+    <p class="fix">↳ Authenticate both ends of the flow (tokens, mutual TLS) and record the control as a mitigation.</p>
+  </article>
+</section>
+
+<section>
+  <h2>The predicate vocabulary</h2>
+  <table class="cmp">
+    <thead><tr><th>Predicate</th><th>Reads</th><th>True when</th></tr></thead>
+    <tbody>
+      <tr><td><code>crossesTrustBoundary</code></td><td>dataflow</td><td>source and destination sit in different trust zones</td></tr>
+      <tr><td><code>notEncrypted</code></td><td>dataflow</td><td>no <code>tls</code>/<code>mtls</code>/<code>https</code>/<code>encrypted</code> tag or secure protocol/attribute</td></tr>
+      <tr><td><code>carriesSensitiveData</code></td><td>either</td><td>touches an asset whose confidentiality ≥ the rule's threshold</td></tr>
+      <tr><td><code>componentKindIn</code></td><td>component</td><td>the component's <code>type</code> is one of the listed kinds</td></tr>
+      <tr><td><code>lowTrustZone</code></td><td>component</td><td>its zone's <code>trustRating</code> ≤ the rule's max</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>How a mitigation changes a finding</h2>
+  <p>Findings aren't final. A <a href="model.html">mitigation</a> that lists an element in its
+  <code>appliesTo</code> down-ranks the findings on it — <code>riskReduction</code> values sum,
+  and the total decides the outcome:</p>
+  <ul class="principles">
+    <li><strong>≥ 100</strong> — the finding is <em>resolved</em> and drops out of the report.</li>
+    <li><strong>70–99</strong> — severity drops two rungs (e.g. Critical → High → Medium).</li>
+    <li><strong>40–69</strong> — severity drops one rung.</li>
+    <li><strong>&lt; 40</strong> — recorded but too weak to move the needle.</li>
+  </ul>
+  <p><code>addresses</code> scopes a mitigation to specific rule ids, so — for example — a WAF
+  can down-rank an edge-exposure finding (T003) without muting an encryption finding (T002)
+  on the same element. A downgraded finding shows its original severity, so nothing is hidden.</p>
+</section>
+
+<section>
+  <h2>Add your own rules</h2>
+  <p>Point <code>analyze</code> at a custom catalogue — it fully replaces the bundled one, so
+  copy the built-ins you want to keep:</p>
+  <pre class="code">wyrm analyze --rules .threatmodel/rules.yaml</pre>
+  <p>A rule is just data. Add a new entry with an <code>id</code>, <code>stride</code>,
+  <code>severity</code>, a <code>target</code> (<code>dataflow</code> or <code>component</code>),
+  a list of <code>when</code> predicates, a <code>description</code>, and a <code>mitigation</code>
+  string. CI re-validates the catalogue against its schema on every change.</p>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · MIT
+  </div>
+</footer>
+</body>
+</html>

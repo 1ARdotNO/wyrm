@@ -119,13 +119,45 @@ wyrm analyze                        # then find the threats in the baseline</pre
   Want a source wyrm doesn't cover yet? <a href="https://github.com/1ARdotNO/wyrm/issues/12">Issue #12</a> tracks the roadmap.</p>
 </section>
 
-<section>
-  <h2>What it can't detect (you add these)</h2>
-  <p>A generated baseline captures <em>structure</em>. It cannot know <em>sensitivity</em> —
-  which flows carry PII, credentials, or regulated data. That's the review step: open the
-  generated model, add <code>assets</code> with confidentiality ratings and attach them to the
-  right components and dataflows, then re-run <code>wyrm analyze</code>. The topology is the
-  90% wyrm does for you; the sensitivity is the 10% only you know.</p>
+<section id="annotate">
+  <h2>Annotate what it can't detect</h2>
+  <p>A generated baseline captures <em>structure</em>. It can't know <em>sensitivity</em> (which
+  data is PII), how access is <em>provisioned</em>, or which services talk to each other
+  internally. You supply that context through <strong>annotations</strong> — two channels,
+  one schema (full spec in
+  <a href="https://github.com/1ARdotNO/wyrm/blob/main/docs/ANNOTATIONS.md">ANNOTATIONS.md</a>):</p>
+  <ul class="principles">
+    <li><strong>External</strong> <code>.threatmodel/data.yaml</code>, keyed by resource address — context
+      <em>without touching your infra code</em>. Auto-loaded by <code>wyrm init</code>.</li>
+    <li><strong>Inline comments</strong> next to a resource (Trivy-style), e.g.
+      <code>&#35; wyrm: assets=pii provisioning=jit</code> — context that lives with the code.</li>
+  </ul>
+  <p>Precedence is <strong>inline &gt; external &gt; generated</strong>, and your direct edits to the
+  <code>.otm.yaml</code> still win on merge — so it all composes and survives regeneration.</p>
+
+  <pre class="code"># .threatmodel/data.yaml
+assets:
+  - { id: pii, name: Customer PII, risk: { confidentiality: 100 } }
+resources:
+  google_container_cluster.workloads:
+    assets: [pii]
+    flows: [google_sql_database_instance.main]     # ← declare an internal dataflow
+  google_project_iam_member.cluster_admin:
+    type: identity
+    provisioning: manual        # manual | approval | attribute-based | jit
+    privilege: high</pre>
+
+  <div class="panel" style="padding:16px;margin-top:18px">
+    <h3 style="margin-top:0">💡 The sleeper feature: <code>flows</code></h3>
+    <p>Terraform and the like describe <em>resources</em>, not the traffic between them — so a
+    generated cloud model often has components but few edges, and STRIDE rules need edges to fire.
+    The <code>flows</code> key lets you <strong>declare the internal dataflows</strong> the code
+    can't express: <code>flows: [db, cache]</code> on a service says "it talks to these." Suddenly
+    <code>analyze</code> has a graph to reason over — a sensitive flow crossing a trust boundary
+    becomes a finding that simply wasn't visible before. It's the smallest annotation with the
+    biggest jump in signal: a handful of <code>flows:</code> lines turns an inventory into a real
+    data-flow diagram.</p>
+  </div>
 </section>
 
 </main>

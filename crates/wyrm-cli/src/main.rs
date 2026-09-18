@@ -316,6 +316,32 @@ fn sanitize_filename(s: &str) -> String {
         .collect()
 }
 
+/// Recursively collect files with the given extensions, skipping hidden dirs
+/// (`.git`, `.terraform`, …) and vendored trees so real repos scan cleanly.
+fn walk_ext(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        if path.is_dir() {
+            if name.starts_with('.') || matches!(name, "node_modules" | "vendor") {
+                continue;
+            }
+            walk_ext(&path, exts, out)?;
+        } else if path.is_file()
+            && path
+                .extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| exts.contains(&x))
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
 /// Read a source file, or concatenate a directory into one stream. A directory of
 /// Terraform (`.tf`) is preferred (joined with newlines); otherwise YAML files are
 /// joined as a multi-document manifest stream.
@@ -325,16 +351,8 @@ fn read_source(source: &Path) -> Result<String, String> {
     }
 
     let gather = |exts: &[&str]| -> Result<Vec<PathBuf>, String> {
-        let mut files: Vec<PathBuf> = std::fs::read_dir(source)
-            .map_err(|e| format!("{}: {e}", source.display()))?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| {
-                p.is_file()
-                    && p.extension()
-                        .and_then(|x| x.to_str())
-                        .is_some_and(|x| exts.contains(&x))
-            })
-            .collect();
+        let mut files = Vec::new();
+        walk_ext(source, exts, &mut files)?;
         files.sort();
         Ok(files)
     };

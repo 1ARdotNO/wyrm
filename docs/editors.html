@@ -47,6 +47,27 @@
   needs no binary.</p>
 </section>
 
+<section id="gui">
+  <h2>GUI editor <span class="pill ok">shipped</span></h2>
+  <p>Prefer clicking to typing YAML? <code>wyrm-gui</code> is a light native window
+  (egui — no Electron) that live-edits a <code>.otm.yaml</code>: browse the model,
+  tweak trust zones, drag asset CIA ratings, add dataflow tags, and drop
+  mitigations from a built-in library. Every change saves to the file and re-runs
+  the STRIDE engine, so findings update as you edit. <code>Cmd-Z</code> /
+  <code>Cmd-Shift-Z</code> undo/redo; One Dark styling.</p>
+  <ol class="steps">
+    <li><h3>Install it</h3>
+      <pre class="code">cargo install --git https://github.com/1ARdotNO/wyrm wyrm-gui</pre></li>
+    <li><h3>Open a model</h3>
+      <pre class="code">wyrm gui .threatmodel/my-system.otm.yaml</pre>
+      <p>From VS Code, run <strong>“Wyrm: Open in GUI editor”</strong> (also in the editor
+      title bar). In Zed, add a <code>.zed/tasks.json</code> entry:
+      <code>{ "command": "wyrm", "args": ["gui", "$ZED_FILE"] }</code>.</p></li>
+  </ol>
+  <p class="note">Because it edits the same file your LSP watches, diagnostics in your
+  text editor refresh the moment you save in the GUI — the two stay in sync.</p>
+</section>
+
 <section id="zed">
   <h2>Zed <span class="pill ok">shipped</span></h2>
   <ol class="steps">

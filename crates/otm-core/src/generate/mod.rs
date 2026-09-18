@@ -131,6 +131,65 @@ pub fn merge(generated: Otm, existing: Otm) -> Otm {
     out
 }
 
+/// Drop generated elements whose id or name contains any of the (case-insensitive)
+/// `patterns` — a way to strip autodetection noise (e.g. IAM/identity). Removes the
+/// matching components, any dataflows touching them, and trust zones left empty.
+pub fn exclude(otm: &mut Otm, patterns: &[String]) {
+    if patterns.is_empty() {
+        return;
+    }
+    let pats: Vec<String> = patterns.iter().map(|p| p.to_lowercase()).collect();
+    let hit = |s: &str| {
+        let s = s.to_lowercase();
+        pats.iter().any(|p| s.contains(p.as_str()))
+    };
+
+    let removed: BTreeSet<String> = otm
+        .components
+        .iter()
+        .filter(|c| hit(&c.id) || hit(&c.name))
+        .map(|c| c.id.clone())
+        .collect();
+    otm.components.retain(|c| !removed.contains(&c.id));
+    otm.dataflows.retain(|d| {
+        !removed.contains(&d.source) && !removed.contains(&d.destination) && !hit(&d.name)
+    });
+
+    // Drop trust zones no surviving component lives in.
+    let used: BTreeSet<&str> = otm
+        .components
+        .iter()
+        .filter_map(|c| c.parent.as_ref().and_then(|p| p.trust_zone.as_deref()))
+        .collect();
+    otm.trust_zones.retain(|z| used.contains(z.id.as_str()));
+}
+
+/// Expand a user-facing exclusion token: named categories → their patterns, or the
+/// token itself as a literal substring.
+pub fn expand_exclude(token: &str) -> Vec<String> {
+    match token.to_lowercase().as_str() {
+        "iam" | "identity" | "access" => [
+            "iam",
+            "_ksa_principal",
+            "_principal",
+            "service_account",
+            "serviceaccount",
+            "org_policy",
+            "org-policy",
+            "custom_role",
+            "custom-role",
+            "deny_policy",
+            "_project_data",
+            "_lien",
+            "_binding",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect(),
+        other => vec![other.to_string()],
+    }
+}
+
 /// Turn an arbitrary name into a stable OTM id.
 pub(crate) fn sanitize_id(s: &str) -> String {
     let id: String = s
@@ -212,5 +271,29 @@ mod tests {
             "topology refreshed"
         );
         assert!(crate::validate::is_valid(&crate::validate(&merged)));
+    }
+
+    #[test]
+    fn exclude_strips_components_and_dangling_flows() {
+        let compose = "services:\n  web: { image: nginx, ports: [\"80:80\"], depends_on: [iam-sync] }\n  iam-sync: { image: busybox }\n  db: { image: postgres }\n";
+        let mut otm = from_compose(compose, "demo").unwrap();
+        exclude(&mut otm, &expand_exclude("iam"));
+        assert!(
+            !otm.components.iter().any(|c| c.id == "iam-sync"),
+            "iam component removed"
+        );
+        assert!(
+            !otm.dataflows.iter().any(|d| d.destination == "iam-sync"),
+            "dangling flow removed"
+        );
+        assert!(
+            otm.components.iter().any(|c| c.id == "web"),
+            "real component kept"
+        );
+        assert!(
+            otm.components.iter().any(|c| c.id == "db"),
+            "real component kept"
+        );
+        assert!(crate::validate::is_valid(&crate::validate(&otm)));
     }
 }

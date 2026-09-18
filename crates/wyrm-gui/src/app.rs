@@ -61,6 +61,11 @@ enum Act {
     CommitRating(usize, u8),
     AddMit(String, usize),
     DelMit(usize),
+    MitSetRisk(usize, u8),
+    MitAddTarget(usize, String),
+    MitDelTarget(usize, String),
+    MitAddAddr(usize, String),
+    MitDelAddr(usize, String),
     DelZone(usize),
     DelComp(usize),
     DelFlow(usize),
@@ -434,6 +439,35 @@ impl App {
                 if i < self.otm.mitigations.len() {
                     self.otm.mitigations.remove(i);
                     self.sel = None;
+                }
+            }
+            Act::MitSetRisk(i, v) => {
+                if let Some(m) = self.otm.mitigations.get_mut(i) {
+                    m.risk_reduction = Some(v);
+                }
+            }
+            Act::MitAddTarget(i, id) => {
+                if let Some(m) = self.otm.mitigations.get_mut(i) {
+                    if !m.applies_to.contains(&id) {
+                        m.applies_to.push(id);
+                    }
+                }
+            }
+            Act::MitDelTarget(i, id) => {
+                if let Some(m) = self.otm.mitigations.get_mut(i) {
+                    m.applies_to.retain(|x| x != &id);
+                }
+            }
+            Act::MitAddAddr(i, id) => {
+                if let Some(m) = self.otm.mitigations.get_mut(i) {
+                    if !m.addresses.contains(&id) {
+                        m.addresses.push(id);
+                    }
+                }
+            }
+            Act::MitDelAddr(i, id) => {
+                if let Some(m) = self.otm.mitigations.get_mut(i) {
+                    m.addresses.retain(|x| x != &id);
                 }
             }
             Act::DelZone(i) => {
@@ -915,25 +949,65 @@ impl App {
         let m = self.otm.mitigations[i].clone();
         header(ui, theme::ORANGE, "Mitigation");
         self.name_field(ui, acts, Sel::Mit(i));
-        if let Some(rr) = m.risk_reduction {
-            ui.label(format!("Risk reduction: {rr}"));
-        }
-        if !m.addresses.is_empty() {
-            ui.label(
-                RichText::new(format!("Addresses: {}", m.addresses.join(", "))).color(theme::MUTED),
-            );
-        }
-        ui.label(RichText::new("Applies to").color(theme::MUTED).small());
-        for t in &m.applies_to {
-            ui.label(RichText::new(t).monospace());
-        }
+
+        // Risk reduction (0 documentary, 100 resolves the finding).
+        let mut rr = m.risk_reduction.unwrap_or(50);
+        ui.horizontal(|ui| {
+            ui.label("Risk reduction");
+            let r = ui.add(egui::Slider::new(&mut rr, 0..=100));
+            if r.drag_stopped() || (r.changed() && !r.dragged()) {
+                acts.push(Act::MitSetRisk(i, rr));
+            }
+        });
+
+        // Applies to — the components/dataflows this control protects.
         ui.add_space(8.0);
-        if ui
-            .button(RichText::new("Delete mitigation").color(theme::RED))
-            .clicked()
-        {
-            acts.push(Act::DelMit(i));
-        }
+        ui.label(
+            RichText::new("Applies to (components / dataflows)")
+                .color(theme::MUTED)
+                .small(),
+        );
+        chips(ui, &m.applies_to, theme::ACCENT, |t| {
+            acts.push(Act::MitDelTarget(i, t))
+        });
+        let mut targets: Vec<(String, String)> = self
+            .otm
+            .components
+            .iter()
+            .map(|c| (c.id.clone(), format!("{} (component)", c.name)))
+            .chain(
+                self.otm
+                    .dataflows
+                    .iter()
+                    .map(|d| (d.id.clone(), format!("{} (dataflow)", d.name))),
+            )
+            .filter(|(id, _)| !m.applies_to.contains(id))
+            .collect();
+        targets.sort_by(|a, b| a.1.cmp(&b.1));
+        add_menu(ui, "+ target", &targets, |id| {
+            acts.push(Act::MitAddTarget(i, id))
+        });
+
+        // Addresses — which rules it neutralises (empty = every finding on targets).
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Addresses rules (empty = all findings on targets)")
+                .color(theme::MUTED)
+                .small(),
+        );
+        chips(ui, &m.addresses, theme::YELLOW, |a| {
+            acts.push(Act::MitDelAddr(i, a))
+        });
+        let rules: Vec<(String, String)> = self
+            .lib
+            .rules
+            .iter()
+            .filter(|r| !m.addresses.contains(&r.id))
+            .map(|r| (r.id.clone(), format!("{} — {}", r.id, r.name)))
+            .collect();
+        add_menu(ui, "+ rule", &rules, |id| acts.push(Act::MitAddAddr(i, id)));
+
+        delete_btn(ui, acts, Act::DelMit(i), "Delete mitigation");
     }
 
     /// The "add a control from the library" box, linked to `element_id`.

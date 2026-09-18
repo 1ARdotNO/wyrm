@@ -174,7 +174,6 @@ pub struct Mitigation {
 }
 
 impl Otm {
-    /// Resolve the trust zone a component sits in, if declared.
     /// The trust zone a component sits in. Walks up the `parent.component` chain
     /// (OTM allows a component's parent to be another component) until it finds
     /// one anchored to a zone — so nested/grouped components inherit their

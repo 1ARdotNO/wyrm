@@ -422,12 +422,44 @@ fn collect_docs(source: &Path, exts: &[&str]) -> Result<Vec<String>, String> {
 /// Build a baseline from a source. A directory holding **both** Terraform and
 /// Kubernetes manifests is imported as one model — k8s workloads are dropped into
 /// the TF cluster's zone so the cluster and what runs on it live together.
+/// Run a renderer (`helm template`, `kustomize build`, …) and return its stdout.
+fn render(bin: &str, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new(bin)
+        .args(args)
+        .output()
+        .map_err(|e| format!("`{bin}` not available ({e}); install it to import this source"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "`{bin} {}` failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 fn build_model(source: &Path, text: &str, project: &str) -> Result<otm_core::model::Otm, String> {
     use otm_core::generate as g;
 
     if g::looks_like_tfplan(text) {
         // `terraform show -json` — fully expanded module-nested resources.
         return g::from_tfplan_json(text, project).map_err(|e| e.to_string());
+    }
+
+    // Helm chart / Kustomize overlay: render to plain manifests via the tool, then
+    // import the result. Keeps wyrm out of the templating business.
+    if source.is_dir() {
+        if source.join("Chart.yaml").is_file() {
+            let rendered = render("helm", &["template", &source.to_string_lossy()])?;
+            return g::from_manifests(&rendered, project).map_err(|e| e.to_string());
+        }
+        if source.join("kustomization.yaml").is_file() || source.join("kustomization.yml").is_file()
+        {
+            let dir = source.to_string_lossy().into_owned();
+            let rendered = render("kustomize", &["build", &dir])
+                .or_else(|_| render("kubectl", &["kustomize", &dir]))?;
+            return g::from_manifests(&rendered, project).map_err(|e| e.to_string());
+        }
     }
 
     // Collect each IaC kind present (a dir may carry both TF and k8s).

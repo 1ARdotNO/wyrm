@@ -306,31 +306,51 @@ fn trust_rating(otm: &Otm, tz_id: &str) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Asset, AssetRisk, Component, ComponentAssets, Mitigation, Parent, Project, TrustRisk, TrustZone};
+    use crate::model::{
+        Asset, AssetRisk, Component, ComponentAssets, Mitigation, Parent, Project, TrustRisk,
+        TrustZone,
+    };
 
     /// An internet-facing component holding sensitive data ⇒ WYRM-T003 (high).
     fn exposed_model() -> Otm {
         Otm {
             otm_version: "0.2.0".into(),
-            project: Project { id: "p".into(), name: "p".into(), owner: None, description: None },
+            project: Project {
+                id: "p".into(),
+                name: "p".into(),
+                owner: None,
+                description: None,
+            },
             trust_zones: vec![TrustZone {
                 id: "edge".into(),
                 name: "edge".into(),
-                risk: Some(TrustRisk { trust_rating: Some(10) }),
+                risk: Some(TrustRisk {
+                    trust_rating: Some(10),
+                }),
             }],
             components: vec![Component {
                 id: "api".into(),
                 name: "api".into(),
                 kind: "web-service".into(),
-                parent: Some(Parent { trust_zone: Some("edge".into()), component: None }),
-                assets: ComponentAssets { processed: vec!["pii".into()], stored: vec![] },
+                parent: Some(Parent {
+                    trust_zone: Some("edge".into()),
+                    component: None,
+                }),
+                assets: ComponentAssets {
+                    processed: vec!["pii".into()],
+                    stored: vec![],
+                },
                 attributes: Default::default(),
             }],
             dataflows: vec![],
             assets: vec![Asset {
                 id: "pii".into(),
                 name: "pii".into(),
-                risk: Some(AssetRisk { confidentiality: 90, integrity: 0, availability: 0 }),
+                risk: Some(AssetRisk {
+                    confidentiality: 90,
+                    integrity: 0,
+                    availability: 0,
+                }),
             }],
             threats: vec![],
             mitigations: vec![],
@@ -388,6 +408,10 @@ mod tests {
         m.addresses = vec!["WYRM-T999".into()]; // targets a different rule
         otm.mitigations.push(m);
         let f = &ThreatLibrary::bundled().analyze(&otm)[0];
-        assert_eq!(f.severity, Severity::High, "unrelated rule stays full severity");
+        assert_eq!(
+            f.severity,
+            Severity::High,
+            "unrelated rule stays full severity"
+        );
     }
 }

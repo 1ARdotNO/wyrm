@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
 members = ["crates/otm-core", "crates/wyrm-cli", "crates/wyrm-lsp"]
+# The GUI pulls a heavy native-windowing tree (eframe/winit/wgpu) with its own
+# system-lib and license surface; keep it out of the core workspace so the main
+# build/test/deny gates stay lean. It builds standalone (own Cargo.lock) + a
+# dedicated CI job.
+exclude = ["crates/wyrm-gui"]
 
 [workspace.package]
 version = "0.1.0"

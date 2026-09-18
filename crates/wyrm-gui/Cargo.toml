@@ -1,0 +1,14 @@
+[package]
+name = "wyrm-gui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/1ARdotNO/wyrm"
+authors = ["1ARdotNO"]
+description = "Native GUI editor for wyrm OTM threat models"
+
+[dependencies]
+otm-core = { path = "../otm-core" }
+eframe = "0.29"
+egui = "0.29"

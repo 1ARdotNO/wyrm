@@ -33,6 +33,26 @@ jobs:
       - name: Dogfood — validate our own threat models
         run: cargo run --quiet --bin wyrm -- validate
 
+  gui:
+    name: gui (standalone)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: crates/wyrm-gui
+      - name: System libs for eframe/winit
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libwayland-dev libxi-dev libxcursor-dev libxrandr-dev
+      - name: Format
+        run: cargo fmt --manifest-path crates/wyrm-gui/Cargo.toml --all --check
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --manifest-path crates/wyrm-gui/Cargo.toml --all-targets -- -D warnings
+      - name: Build
+        run: cargo build --manifest-path crates/wyrm-gui/Cargo.toml --locked
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

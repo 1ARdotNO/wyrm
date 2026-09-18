@@ -49,7 +49,7 @@ fn add_blocks(b: &mut Builder, body: &Body) {
                 let rtype = bl.labels.first().map(label_str).unwrap_or_default();
                 let rname = bl.labels.get(1).map(label_str).unwrap_or_default();
                 if !rtype.is_empty() && !rname.is_empty() {
-                    b.resource(rtype, rname, bl.body());
+                    b.resource(rtype, rname, Attrs::Hcl(bl.body()));
                 }
             }
             // Module calls are where most real infra lives — model each as a
@@ -93,20 +93,32 @@ impl Builder {
         );
     }
 
-    fn resource(&mut self, rtype: &str, rname: &str, body: &Body) {
+    fn resource(&mut self, rtype: &str, rname: &str, attrs: Attrs) {
         let id = sanitize_id(&format!("{rtype}-{rname}"));
         let display = format!("{rtype}.{rname}");
+        self.add_resource(rtype, &id, &display, rname, attrs);
+    }
 
+    /// Add every managed resource in a plan/state-JSON module, keyed by its full
+    /// (module-scoped) address so nested resources never collide.
+    fn resource_from_plan(&mut self, r: &StateResource) {
+        let id = sanitize_id(&r.address);
+        self.add_resource(&r.rtype, &id, &r.address, &r.name, Attrs::Json(&r.values));
+    }
+
+    /// Shared resource handling for both HCL and plan-JSON. `id`/`display` carry
+    /// the (module-scoped) address; `label` names the resource in mitigations.
+    fn add_resource(&mut self, rtype: &str, id: &str, display: &str, label: &str, attrs: Attrs) {
         // IAP on a backend service = a Google-managed auth wall on the HTTPS path.
-        if iap_enabled(rtype, body) {
+        if iap_enabled(rtype, attrs) {
             self.iap = true;
         }
 
         // Edge controls attach nowhere specific here — record them as mitigations.
         if let Some(control) = mitigation_for(rtype) {
             self.mitigations.push(Mitigation {
-                id: id.clone(),
-                name: format!("{control} ({rname})"),
+                id: id.to_string(),
+                name: format!("{control} ({label})"),
                 description: None,
                 risk_reduction: None,
                 ..Default::default()
@@ -117,16 +129,16 @@ impl Builder {
         match classify(rtype) {
             Some(Kind::Datastore(k)) => {
                 self.has_db = true;
-                self.put(&id, &display, k, TZ_DATA);
+                self.put(id, display, k, TZ_DATA);
             }
-            Some(Kind::Compute) => self.put(&id, &display, "process", TZ_INTERNAL),
+            Some(Kind::Compute) => self.put(id, display, "process", TZ_INTERNAL),
             Some(Kind::Edge) => {
-                self.put(&id, &display, "web-service", TZ_INTERNAL);
-                if is_internet_facing(rtype, body) {
-                    let enc = edge_encryption(rtype, body);
-                    let fid = self.ingress(&id, &display, enc);
+                self.put(id, display, "web-service", TZ_INTERNAL);
+                if is_internet_facing(rtype, attrs) {
+                    let enc = edge_encryption(rtype, attrs);
+                    let fid = self.ingress(id, display, enc);
                     if enc == Some("tls") {
-                        self.https_edges.push((id.clone(), fid));
+                        self.https_edges.push((id.to_string(), fid));
                     }
                 }
             }
@@ -398,22 +410,24 @@ fn mitigation_for(rtype: &str) -> Option<&'static str> {
 }
 
 /// Provider defaults favour exposure — treat "attribute absent" as internet-facing.
-fn is_internet_facing(rtype: &str, body: &Body) -> bool {
+fn is_internet_facing(rtype: &str, a: Attrs) -> bool {
     match rtype {
-        "aws_lb" | "aws_alb" | "aws_elb" => attr_bool(body, "internal") != Some(true),
-        "aws_apigatewayv2_api" => attr_bool(body, "disable_execute_api_endpoint") != Some(true),
+        "aws_lb" | "aws_alb" | "aws_elb" => a.get_bool("internal") != Some(true),
+        "aws_apigatewayv2_api" => a.get_bool("disable_execute_api_endpoint") != Some(true),
         "aws_api_gateway_rest_api" => true,
         "google_compute_global_forwarding_rule" | "google_compute_forwarding_rule" => {
-            attr_str(body, "load_balancing_scheme").is_none_or(|s| s.starts_with("EXTERNAL"))
+            a.get_str("load_balancing_scheme")
+                .is_none_or(|s| s.starts_with("EXTERNAL"))
         }
         "google_container_cluster" => {
             // Public control plane unless explicitly private.
-            nested_attr_bool(body, "private_cluster_config", "enable_private_endpoint")
+            a.nested("private_cluster_config")
+                .and_then(|n| n.get_bool("enable_private_endpoint"))
                 != Some(true)
         }
-        "azurerm_lb" | "azurerm_application_gateway" => {
-            nested_has_attr(body, "frontend_ip_configuration", "public_ip_address_id")
-        }
+        "azurerm_lb" | "azurerm_application_gateway" => a
+            .nested("frontend_ip_configuration")
+            .is_some_and(|n| n.has("public_ip_address_id")),
         // VPN gateways terminate on a public IP; the tunnel itself is encrypted.
         "google_compute_vpn_gateway"
         | "google_compute_ha_vpn_gateway"
@@ -428,7 +442,7 @@ fn is_internet_facing(rtype: &str, body: &Body) -> bool {
 /// Returns `Some("encrypted")` for IPSec/VPN tunnels, `Some("tls")` for HTTPS/SSL
 /// -proxy load balancers, `None` for plain HTTP / unknown (stays flagged).
 /// Detected structurally (protocols, proxy target), never by resource name.
-fn edge_encryption(rtype: &str, body: &Body) -> Option<&'static str> {
+fn edge_encryption(rtype: &str, a: Attrs) -> Option<&'static str> {
     match rtype {
         "google_compute_vpn_gateway"
         | "google_compute_ha_vpn_gateway"
@@ -437,13 +451,14 @@ fn edge_encryption(rtype: &str, body: &Body) -> Option<&'static str> {
         | "aws_vpn_connection"
         | "azurerm_virtual_network_gateway" => Some("encrypted"),
         "google_compute_forwarding_rule" | "google_compute_global_forwarding_rule" => {
-            let proto = attr_str(body, "ip_protocol").unwrap_or("");
+            let proto = a.get_str("ip_protocol").unwrap_or("");
             let ipsec = proto.eq_ignore_ascii_case("ESP") || proto.eq_ignore_ascii_case("AH");
-            let ports = attr_str(body, "port_range")
-                .or_else(|| attr_str(body, "ports"))
+            let ports = a
+                .get_str("port_range")
+                .or_else(|| a.get_str("ports"))
                 .unwrap_or("");
             let ike = ports.contains("500") || ports.contains("4500");
-            let target = attr_str(body, "target").unwrap_or("").to_lowercase();
+            let target = a.get_str("target").unwrap_or("").to_lowercase();
             if ipsec || ike || target.contains("vpn") {
                 Some("encrypted")
             } else if target.contains("https_proxy")
@@ -462,15 +477,15 @@ fn edge_encryption(rtype: &str, body: &Body) -> Option<&'static str> {
 /// True when a backend service has IAP switched on (`iap { enabled = true }`).
 /// A bare `iap {}` also counts — its presence signals intent; `enabled = false`
 /// does not. Only backend-service resources carry the gate.
-fn iap_enabled(rtype: &str, body: &Body) -> bool {
+fn iap_enabled(rtype: &str, a: Attrs) -> bool {
     if !matches!(
         rtype,
         "google_compute_backend_service" | "google_compute_region_backend_service"
     ) {
         return false;
     }
-    match nested_body(body, "iap") {
-        Some(iap) => attr_bool(iap, "enabled") != Some(false),
+    match a.nested("iap") {
+        Some(iap) => iap.get_bool("enabled") != Some(false),
         None => false,
     }
 }
@@ -507,14 +522,117 @@ fn nested_body<'a>(body: &'a Body, block_id: &str) -> Option<&'a Body> {
     })
 }
 
-fn nested_attr_bool(body: &Body, block_id: &str, key: &str) -> Option<bool> {
-    attr_bool(nested_body(body, block_id)?, key)
+/// A resource's attributes, from HCL (`resource {}` body) or plan-JSON (`values`).
+/// Lets the exposure predicates read either backend uniformly, so the HCL and
+/// plan-JSON importers can never drift apart.
+#[derive(Clone, Copy)]
+enum Attrs<'a> {
+    Hcl(&'a Body),
+    Json(&'a serde_json::Value),
 }
 
-fn nested_has_attr(body: &Body, block_id: &str, key: &str) -> bool {
-    nested_body(body, block_id)
-        .and_then(|b| attr(b, key))
-        .is_some()
+impl<'a> Attrs<'a> {
+    fn get_str(self, key: &str) -> Option<&'a str> {
+        match self {
+            Attrs::Hcl(b) => attr_str(b, key),
+            Attrs::Json(v) => v.get(key).and_then(serde_json::Value::as_str),
+        }
+    }
+    fn get_bool(self, key: &str) -> Option<bool> {
+        match self {
+            Attrs::Hcl(b) => attr_bool(b, key),
+            Attrs::Json(v) => v.get(key).and_then(serde_json::Value::as_bool),
+        }
+    }
+    fn has(self, key: &str) -> bool {
+        match self {
+            Attrs::Hcl(b) => attr(b, key).is_some(),
+            Attrs::Json(v) => v.get(key).is_some_and(|x| !x.is_null()),
+        }
+    }
+    /// A nested block/object by key. Plan-JSON renders a block as an array of
+    /// objects (or a single object); take the first.
+    fn nested(self, key: &str) -> Option<Attrs<'a>> {
+        match self {
+            Attrs::Hcl(b) => nested_body(b, key).map(Attrs::Hcl),
+            Attrs::Json(v) => {
+                let inner = v.get(key)?;
+                let obj = inner.as_array().and_then(|a| a.first()).unwrap_or(inner);
+                obj.is_object().then_some(Attrs::Json(obj))
+            }
+        }
+    }
+}
+
+/// Terraform plan/state JSON (`terraform show -json`). Fully expanded — module
+/// contents inlined with `module.foo.…` addresses, `count`/`for_each` resolved —
+/// so nested resources are visible without descending into module sources.
+#[derive(serde::Deserialize)]
+struct PlanFile {
+    #[serde(default)]
+    planned_values: Option<StateValues>,
+    /// `terraform show -json` of a state file uses `values` instead.
+    #[serde(default)]
+    values: Option<StateValues>,
+}
+
+#[derive(serde::Deserialize)]
+struct StateValues {
+    #[serde(default)]
+    root_module: StateModule,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct StateModule {
+    #[serde(default)]
+    resources: Vec<StateResource>,
+    #[serde(default)]
+    child_modules: Vec<StateModule>,
+}
+
+#[derive(serde::Deserialize)]
+struct StateResource {
+    address: String,
+    #[serde(rename = "type")]
+    rtype: String,
+    name: String,
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    values: serde_json::Value,
+}
+
+/// Build a baseline from Terraform plan/state JSON. This is the accurate path:
+/// every resource is present with its module-scoped address, so there is no
+/// module blindness, no address collision, and `count`/`for_each` are expanded.
+pub fn from_tfplan_json(text: &str, project_name: &str) -> Result<Otm, crate::Error> {
+    let plan: PlanFile = serde_json::from_str(text)?;
+    let root = plan
+        .planned_values
+        .or(plan.values)
+        .ok_or_else(|| crate::Error::Hcl("no planned_values/values in plan JSON".into()))?;
+    let mut b = Builder::default();
+    walk_plan_module(&mut b, &root.root_module);
+    Ok(b.build(project_name))
+}
+
+fn walk_plan_module(b: &mut Builder, m: &StateModule) {
+    for r in &m.resources {
+        if r.mode == "managed" {
+            b.resource_from_plan(r);
+        }
+    }
+    for c in &m.child_modules {
+        walk_plan_module(b, c);
+    }
+}
+
+/// Heuristic: does this text look like Terraform plan/state JSON?
+pub fn looks_like_tfplan(text: &str) -> bool {
+    let head = &text[..text.len().min(4000)];
+    head.contains("\"planned_values\"")
+        || (head.contains("\"format_version\"") && head.contains("\"root_module\""))
+        || (head.contains("\"values\"") && head.contains("\"root_module\""))
 }
 
 #[cfg(test)]
@@ -606,6 +724,43 @@ resource "google_compute_backend_service" "web" {
         // HTTPS-proxy LB → tls tag; plain HTTP LB → untagged (still flagged).
         assert!(flow("https-lb").unwrap().tags.iter().any(|t| t == "tls"));
         assert!(flow("http-lb").unwrap().tags.is_empty());
+    }
+
+    #[test]
+    fn plan_json_expands_nested_module_resources() {
+        // A DB lives inside module.data; an external LB at the root. Plan JSON
+        // carries both with module-scoped addresses — no descent into sources.
+        let plan = r#"{
+  "format_version": "1.0",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        { "address": "aws_lb.edge", "type": "aws_lb", "name": "edge", "mode": "managed",
+          "values": { "internal": false } }
+      ],
+      "child_modules": [
+        { "address": "module.data",
+          "resources": [
+            { "address": "module.data.aws_db_instance.main", "type": "aws_db_instance",
+              "name": "main", "mode": "managed", "values": { "engine": "postgres" } }
+          ] }
+      ]
+    }
+  }
+}"#;
+        let otm = from_tfplan_json(plan, "cloud").unwrap();
+        assert!(crate::validate::is_valid(&crate::validate(&otm)));
+        // The module-nested database is present, in the data tier.
+        let db = otm
+            .components
+            .iter()
+            .find(|c| c.name == "module.data.aws_db_instance.main")
+            .expect("nested module resource surfaced");
+        assert_eq!(db.kind, "database");
+        assert_eq!(db.parent.as_ref().unwrap().trust_zone.as_deref(), Some(TZ_DATA));
+        // The root LB is internet-facing.
+        assert!(otm.dataflows.iter().any(|d| d.source == EXTERNAL));
+        assert!(looks_like_tfplan(plan));
     }
 
     #[test]

@@ -44,7 +44,22 @@
   <pre class="code">wyrm init                          # auto-detect compose in the current dir
 wyrm init --from k8s/               # a directory of Kubernetes manifests
 wyrm init --from main.tf -o -       # print to stdout
+wyrm init --from tfplan.json        # a Terraform plan (fully expands modules)
 wyrm analyze                        # then find the threats in the baseline</pre>
+
+  <div class="panel" style="padding:16px;margin:14px 0">
+    <h3 style="margin-top:0">🧩 Terraform modules: point wyrm at a plan for full resolution</h3>
+    <p>Reading <code>.tf</code> directly, wyrm sees resources inside <em>local</em> modules but can't
+    expand <code>count</code>/<code>for_each</code> or reach registry/git modules — the same blind
+    spot every HCL scanner has. For a complete, collision-free picture, feed it the plan Terraform
+    already resolved:</p>
+    <pre class="code">terraform plan -out=tfplan
+terraform show -json tfplan > tfplan.json
+wyrm init --from tfplan.json</pre>
+    <p>Every resource then arrives with its module-scoped address
+    (<code>module.data.google_sql_database_instance.main</code>) — modules unnested, instances
+    expanded, nothing lost to name collisions. Same detection rules, exact topology.</p>
+  </div>
   <p>It writes <code>.threatmodel/&lt;project&gt;.otm.yaml</code>. Two principles guide
   every rule:</p>
   <ul class="principles">

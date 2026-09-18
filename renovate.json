@@ -60,6 +60,11 @@
       "description": "Automerge the custom-managed grammar/CDN bumps too.",
       "matchManagers": ["custom.regex"],
       "automerge": true
+    },
+    {
+      "description": "Hold the GUI's egui/eframe at 0.29 — 0.3x is a major API break (App::ui, CornerRadius, panel moves). Unpin when wyrm-gui is migrated (see task).",
+      "matchPackageNames": ["eframe", "egui"],
+      "allowedVersions": "<0.30.0"
     }
   ]
 }

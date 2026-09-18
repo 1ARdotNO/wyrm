@@ -61,6 +61,10 @@ enum Act {
     CommitRating(usize, u8),
     AddMit(String, usize),
     DelMit(usize),
+    DelZone(usize),
+    DelComp(usize),
+    DelFlow(usize),
+    DelAsset(usize),
     NewZone,
     NewComp,
     NewAsset,
@@ -82,6 +86,8 @@ pub struct App {
     edit_name: String,
     edit_cia: [u8; 3],
     status: String,
+    /// Last mtime we wrote or loaded — used to detect external file changes.
+    file_mtime: Option<std::time::SystemTime>,
 }
 
 impl App {
@@ -96,6 +102,7 @@ impl App {
         };
         let lib = ThreatLibrary::bundled();
         let findings = lib.analyze(&otm);
+        let file_mtime = path.as_ref().and_then(|p| mtime(p));
         Self {
             path,
             otm,
@@ -110,6 +117,75 @@ impl App {
             edit_name: String::new(),
             edit_cia: [0; 3],
             status,
+            file_mtime,
+        }
+    }
+
+    /// Reload when the file changes on disk (editor / AI / CLI), preserving the
+    /// user's selection by element id. Skips our own writes and mid-write parses.
+    fn poll_external(&mut self) {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let Some(cur) = mtime(&path) else { return };
+        if Some(cur) == self.file_mtime {
+            return;
+        }
+        // On a mid-write parse failure, leave mtime unchanged and retry next poll.
+        if let Ok(o) = otm_core::parse_file(&path) {
+            // Preserve selection by id, not index (external writes may reorder).
+            let keep = self.sel.and_then(|s| self.sel_id(s).map(|id| (s, id)));
+            self.otm = o;
+            self.sel = keep.and_then(|(s, id)| self.find_sel(s, &id));
+            self.file_mtime = Some(cur);
+            self.findings = self.lib.analyze(&self.otm);
+            self.sync_buffers();
+            self.status = format!("reloaded (external change) · {}", path.display());
+        }
+    }
+
+    fn sel_id(&self, sel: Sel) -> Option<String> {
+        match sel {
+            Sel::Zone(i) => self.otm.trust_zones.get(i).map(|z| z.id.clone()),
+            Sel::Comp(i) => self.otm.components.get(i).map(|c| c.id.clone()),
+            Sel::Flow(i) => self.otm.dataflows.get(i).map(|d| d.id.clone()),
+            Sel::Asset(i) => self.otm.assets.get(i).map(|a| a.id.clone()),
+            Sel::Mit(i) => self.otm.mitigations.get(i).map(|m| m.id.clone()),
+        }
+    }
+
+    fn find_sel(&self, like: Sel, id: &str) -> Option<Sel> {
+        match like {
+            Sel::Zone(_) => self
+                .otm
+                .trust_zones
+                .iter()
+                .position(|z| z.id == id)
+                .map(Sel::Zone),
+            Sel::Comp(_) => self
+                .otm
+                .components
+                .iter()
+                .position(|c| c.id == id)
+                .map(Sel::Comp),
+            Sel::Flow(_) => self
+                .otm
+                .dataflows
+                .iter()
+                .position(|d| d.id == id)
+                .map(Sel::Flow),
+            Sel::Asset(_) => self
+                .otm
+                .assets
+                .iter()
+                .position(|a| a.id == id)
+                .map(Sel::Asset),
+            Sel::Mit(_) => self
+                .otm
+                .mitigations
+                .iter()
+                .position(|m| m.id == id)
+                .map(Sel::Mit),
         }
     }
 
@@ -157,7 +233,11 @@ impl App {
                     let _ = std::fs::create_dir_all(parent);
                 }
                 match std::fs::write(&path, body) {
-                    Ok(()) => self.status = format!("saved ✓ · {}", path.display()),
+                    Ok(()) => {
+                        // Record our own write so the watcher doesn't reload it.
+                        self.file_mtime = mtime(&path);
+                        self.status = format!("saved ✓ · {}", path.display());
+                    }
                     Err(e) => self.status = format!("write error: {e}"),
                 }
             }
@@ -353,6 +433,31 @@ impl App {
             Act::DelMit(i) => {
                 if i < self.otm.mitigations.len() {
                     self.otm.mitigations.remove(i);
+                    self.sel = None;
+                }
+            }
+            Act::DelZone(i) => {
+                if i < self.otm.trust_zones.len() {
+                    self.otm.trust_zones.remove(i);
+                    self.sel = None;
+                }
+            }
+            Act::DelComp(i) => {
+                if i < self.otm.components.len() {
+                    self.otm.components.remove(i);
+                    self.sel = None;
+                }
+            }
+            Act::DelFlow(i) => {
+                if i < self.otm.dataflows.len() {
+                    self.otm.dataflows.remove(i);
+                    self.sel = None;
+                }
+            }
+            Act::DelAsset(i) => {
+                if i < self.otm.assets.len() {
+                    self.otm.assets.remove(i);
+                    self.sel = None;
                 }
             }
             Act::NewZone => {
@@ -433,16 +538,16 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut Ui, acts: &mut Vec<Act>) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("🐉 wyrm").color(theme::ACCENT).strong());
+            ui.label(RichText::new("wyrm").color(theme::ACCENT).strong());
             ui.separator();
             if ui
-                .add_enabled(!self.undo.is_empty(), egui::Button::new("↶ Undo"))
+                .add_enabled(!self.undo.is_empty(), egui::Button::new("Undo"))
                 .clicked()
             {
                 acts.push(Act::Undo);
             }
             if ui
-                .add_enabled(!self.redo.is_empty(), egui::Button::new("↷ Redo"))
+                .add_enabled(!self.redo.is_empty(), egui::Button::new("Redo"))
                 .clicked()
             {
                 acts.push(Act::Redo);
@@ -458,10 +563,10 @@ impl App {
 
     fn left_panel(&mut self, ui: &mut Ui, acts: &mut Vec<Act>) {
         ui.horizontal(|ui| {
-            ui.label("🔎");
+            ui.label(RichText::new("Filter").small().color(theme::MUTED));
             ui.add(
                 egui::TextEdit::singleline(&mut self.filter)
-                    .hint_text("filter…")
+                    .hint_text("type to filter…")
                     .desired_width(f32::INFINITY),
             );
         });
@@ -561,7 +666,7 @@ impl App {
         self.scroll_to = false;
     }
 
-    /// A collapsible tree section with an inline "＋ add" button on the header.
+    /// A collapsible tree section with an inline "+ add" button on the header.
     fn tree_section(
         &self,
         ui: &mut Ui,
@@ -576,7 +681,7 @@ impl App {
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), hid, true);
         let header = state.show_header(ui, |ui| {
             ui.label(RichText::new(title).small().strong().color(theme::MUTED));
-            if ui.small_button("＋").on_hover_text("Add new").clicked() {
+            if ui.small_button("+").on_hover_text("Add new").clicked() {
                 acts.push(add);
             }
         });
@@ -599,7 +704,7 @@ impl App {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 if self.findings.is_empty() {
-                    ui.label(RichText::new("No findings 🎉").color(theme::GREEN));
+                    ui.label(RichText::new("No findings").color(theme::GREEN));
                 }
                 for f in &self.findings {
                     let r = ui.horizontal_wrapped(|ui| {
@@ -681,6 +786,7 @@ impl App {
         if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
             acts.push(Act::CommitRating(i, self.edit_cia[0]));
         }
+        delete_btn(ui, acts, Act::DelZone(i), "Delete trust zone");
     }
 
     fn inspect_comp(&mut self, ui: &mut Ui, acts: &mut Vec<Act>, i: usize) {
@@ -739,10 +845,11 @@ impl App {
             .filter(|a| !held.contains(&a.id))
             .map(|a| (a.id.clone(), a.name.clone()))
             .collect();
-        add_menu(ui, "＋ asset", &avail, |id| {
+        add_menu(ui, "+ asset", &avail, |id| {
             acts.push(Act::AddCompAsset(i, id))
         });
         self.mitigation_box(ui, acts, comp.id.clone());
+        delete_btn(ui, acts, Act::DelComp(i), "Delete component");
     }
 
     fn inspect_flow(&mut self, ui: &mut Ui, acts: &mut Vec<Act>, i: usize) {
@@ -776,8 +883,9 @@ impl App {
             .filter(|(id, _)| !flow.tags.iter().any(|t| t == id))
             .map(|(id, label)| (id.to_string(), label.to_string()))
             .collect();
-        add_menu(ui, "＋ tag", &avail, |id| acts.push(Act::AddTag(i, id)));
+        add_menu(ui, "+ tag", &avail, |id| acts.push(Act::AddTag(i, id)));
         self.mitigation_box(ui, acts, flow.id.clone());
+        delete_btn(ui, acts, Act::DelFlow(i), "Delete dataflow");
     }
 
     fn inspect_asset(&mut self, ui: &mut Ui, acts: &mut Vec<Act>, i: usize) {
@@ -800,6 +908,7 @@ impl App {
         if changed {
             acts.push(Act::CommitCia(i, self.edit_cia));
         }
+        delete_btn(ui, acts, Act::DelAsset(i), "Delete asset");
     }
 
     fn inspect_mit(&mut self, ui: &mut Ui, acts: &mut Vec<Act>, i: usize) {
@@ -819,7 +928,10 @@ impl App {
             ui.label(RichText::new(t).monospace());
         }
         ui.add_space(8.0);
-        if ui.button("🗑 Delete mitigation").clicked() {
+        if ui
+            .button(RichText::new("Delete mitigation").color(theme::RED))
+            .clicked()
+        {
             acts.push(Act::DelMit(i));
         }
     }
@@ -1018,6 +1130,11 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll the file for external edits (editor / AI / CLI) and keep repainting
+        // so we notice them even while idle.
+        self.poll_external();
+        ctx.request_repaint_after(std::time::Duration::from_millis(800));
+
         let mut acts: Vec<Act> = Vec::new();
         ctx.input(|inp| {
             let cmd = inp.modifiers.command;
@@ -1149,6 +1266,18 @@ fn header(ui: &mut Ui, color: Color32, kind: &str) {
     ui.add_space(4.0);
 }
 
+fn delete_btn(ui: &mut Ui, acts: &mut Vec<Act>, act: Act, label: &str) {
+    ui.add_space(12.0);
+    ui.separator();
+    if ui.button(RichText::new(label).color(theme::RED)).clicked() {
+        acts.push(act);
+    }
+}
+
+fn mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
 fn chips(ui: &mut Ui, items: &[String], color: Color32, mut on_del: impl FnMut(String)) {
     ui.horizontal_wrapped(|ui| {
         if items.is_empty() {
@@ -1157,7 +1286,7 @@ fn chips(ui: &mut Ui, items: &[String], color: Color32, mut on_del: impl FnMut(S
         for it in items {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(it).color(color));
-                if ui.small_button("✕").clicked() {
+                if ui.small_button("×").clicked() {
                     on_del(it.clone());
                 }
             });
@@ -1178,7 +1307,6 @@ fn add_menu(
         for (id, name) in options {
             if ui.button(name).clicked() {
                 on_pick(id.clone());
-                ui.close_menu();
             }
         }
     });

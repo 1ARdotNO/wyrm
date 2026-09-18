@@ -635,10 +635,22 @@ impl App {
                     },
                 );
                 self.tree_section(ui, acts, "comps", "COMPONENTS", Act::NewComp, |ui, acts| {
+                    // Group by the `module` attribute (plan-JSON tags these) so big
+                    // repos collapse into per-module folders; ungrouped show flat.
+                    let mut ungrouped: Vec<usize> = Vec::new();
+                    let mut groups: std::collections::BTreeMap<&str, Vec<usize>> =
+                        std::collections::BTreeMap::new();
                     for (i, c) in self.otm.components.iter().enumerate() {
                         if !(passes(&c.name, &filter) || passes(&c.kind, &filter)) {
                             continue;
                         }
+                        match c.attributes.get("module") {
+                            Some(m) => groups.entry(m.as_str()).or_default().push(i),
+                            None => ungrouped.push(i),
+                        }
+                    }
+                    for i in ungrouped {
+                        let c = &self.otm.components[i];
                         let sel = self.sel == Some(Sel::Comp(i));
                         let r = tree_item(ui, sel, type_color(&c.kind), comp_job(&c.name, &c.kind));
                         if r.clicked() {
@@ -647,6 +659,42 @@ impl App {
                         if sel && self.scroll_to {
                             r.scroll_to_me(Some(egui::Align::Center));
                         }
+                    }
+                    for (module, idxs) in &groups {
+                        let hid = ui.make_persistent_id(("mod", *module));
+                        let open = !filter.is_empty(); // expand while filtering
+                        let st = egui::collapsing_header::CollapsingState::load_with_default_open(
+                            ui.ctx(),
+                            hid,
+                            open,
+                        );
+                        let prefix = format!("{module}.");
+                        st.show_header(ui, |ui| {
+                            ui.label(
+                                RichText::new(format!("{module}  ({})", idxs.len()))
+                                    .small()
+                                    .color(theme::PURPLE),
+                            );
+                        })
+                        .body(|ui| {
+                            for &i in idxs {
+                                let c = &self.otm.components[i];
+                                let short = c.name.strip_prefix(&prefix).unwrap_or(&c.name);
+                                let sel = self.sel == Some(Sel::Comp(i));
+                                let r = tree_item(
+                                    ui,
+                                    sel,
+                                    type_color(&c.kind),
+                                    comp_job(short, &c.kind),
+                                );
+                                if r.clicked() {
+                                    acts.push(Act::Select(Sel::Comp(i)));
+                                }
+                                if sel && self.scroll_to {
+                                    r.scroll_to_me(Some(egui::Align::Center));
+                                }
+                            }
+                        });
                     }
                 });
                 self.tree_section(ui, acts, "flows", "DATAFLOWS", Act::NewFlow, |ui, acts| {

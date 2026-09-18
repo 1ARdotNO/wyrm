@@ -1,7 +1,7 @@
 //! A light approximation of Zed's One Dark: same palette and calm spacing, none
 //! of the weight. Applied once at startup.
 
-use egui::{Color32, Context, Rounding, Stroke};
+use egui::{Color32, Context, CornerRadius, Stroke};
 
 pub const BG: Color32 = Color32::from_rgb(0x28, 0x2c, 0x34);
 pub const PANEL: Color32 = Color32::from_rgb(0x24, 0x28, 0x2f);
@@ -18,7 +18,7 @@ pub const PURPLE: Color32 = Color32::from_rgb(0xc6, 0x78, 0xdd);
 
 pub fn apply(ctx: &Context) {
     let mut v = egui::Visuals::dark();
-    let r = Rounding::same(4.0);
+    let r = CornerRadius::same(4);
     v.panel_fill = PANEL;
     v.window_fill = BG;
     v.extreme_bg_color = SUNKEN;
@@ -27,7 +27,7 @@ pub fn apply(ctx: &Context) {
     v.hyperlink_color = ACCENT;
     v.selection.bg_fill = Color32::from_rgb(0x3b, 0x44, 0x51);
     v.selection.stroke = Stroke::new(1.0_f32, ACCENT);
-    v.window_rounding = r;
+    v.window_corner_radius = r;
     for w in [
         &mut v.widgets.noninteractive,
         &mut v.widgets.inactive,
@@ -35,7 +35,7 @@ pub fn apply(ctx: &Context) {
         &mut v.widgets.active,
         &mut v.widgets.open,
     ] {
-        w.rounding = r;
+        w.corner_radius = r;
     }
     v.widgets.inactive.bg_fill = ELEV;
     v.widgets.inactive.weak_bg_fill = ELEV;
@@ -47,6 +47,6 @@ pub fn apply(ctx: &Context) {
     let mut style = (*ctx.style()).clone();
     style.spacing.item_spacing = egui::vec2(8.0, 6.0);
     style.spacing.button_padding = egui::vec2(9.0, 4.0);
-    style.spacing.window_margin = egui::Margin::same(10.0);
+    style.spacing.window_margin = egui::Margin::same(10);
     ctx.set_style(style);
 }

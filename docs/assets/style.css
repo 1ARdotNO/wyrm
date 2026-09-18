@@ -118,3 +118,14 @@ table.cmp { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 
 .note { color: var(--dim); font-size: 14px; }
 
 footer { padding: 26px 0; color: var(--dim); font-size: 14px; text-align: center; }
+
+/* rules page */
+.pill.crit { background: #3d1417; color: var(--crit); }
+.pill.high { background: #3d2413; color: var(--high); }
+.pill.med  { background: #3d3413; color: var(--med); }
+.rule { border: 1px solid #2a3340; border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.rule h3 { margin: 0 0 8px; font-size: 16px; }
+.rule p { margin: 6px 0; }
+.rule .stride { font-size: 12px; color: var(--dim); font-weight: 600; }
+.rule .when { color: var(--dim); font-size: 13px; }
+.rule .fix { color: #a6e0a6; font-size: 13px; }

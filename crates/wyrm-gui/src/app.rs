@@ -5,7 +5,10 @@
 use crate::library::{MITIGATIONS, TAGS};
 use crate::theme;
 use egui::text::LayoutJob;
-use egui::{Align2, Color32, FontId, Pos2, Rect, RichText, Rounding, Sense, Shape, Stroke, Ui};
+use egui::{
+    Align2, Color32, CornerRadius, FontId, Pos2, Rect, RichText, Sense, Shape, Stroke, StrokeKind,
+    Ui,
+};
 use otm_core::model::{
     Asset, AssetRisk, Component, Dataflow, Mitigation, Otm, Parent, Project, TrustRisk, TrustZone,
 };
@@ -1170,16 +1173,17 @@ impl App {
                 let r = rect.translate(o);
                 let resp = ui.interact(r, ui.make_persistent_id(("node", idx)), Sense::click());
                 let selected = self.sel == Some(Sel::Comp(*idx));
-                p.rect_filled(r, Rounding::same(6.0), theme::ELEV);
+                p.rect_filled(r, CornerRadius::same(6), theme::ELEV);
                 // type color bar on the left edge
                 let bar = Rect::from_min_max(r.min, egui::pos2(r.min.x + 4.0, r.max.y));
-                p.rect_filled(bar, Rounding::same(2.0), type_color(kind));
+                p.rect_filled(bar, CornerRadius::same(2), type_color(kind));
                 // a finding? outline in the severity color + a corner dot.
                 if let Some(sev) = sev {
                     p.rect_stroke(
                         r,
-                        Rounding::same(6.0),
+                        CornerRadius::same(6),
                         Stroke::new(1.5_f32, sev_color(*sev)),
+                        StrokeKind::Inside,
                     );
                     p.circle_filled(
                         egui::pos2(r.max.x - 6.0, r.min.y + 6.0),
@@ -1188,7 +1192,12 @@ impl App {
                     );
                 }
                 if selected {
-                    p.rect_stroke(r, Rounding::same(6.0), Stroke::new(2.0_f32, theme::ACCENT));
+                    p.rect_stroke(
+                        r,
+                        CornerRadius::same(6),
+                        Stroke::new(2.0_f32, theme::ACCENT),
+                        StrokeKind::Inside,
+                    );
                 }
                 p.text(
                     egui::pos2(r.min.x + 10.0, r.center().y),

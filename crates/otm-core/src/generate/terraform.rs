@@ -9,29 +9,60 @@
 
 use super::*;
 use crate::model::{Component, Dataflow, Mitigation, Otm, Parent, Project};
-use hcl::{Block, Body, Expression, Structure};
+use hcl::{Body, Expression, Structure};
 use std::collections::BTreeSet;
 
-/// Build a baseline [`Otm`] from Terraform configuration.
+/// Build a baseline [`Otm`] from a single Terraform document.
 pub fn from_terraform(text: &str, project_name: &str) -> Result<Otm, crate::Error> {
     let body: Body = hcl::from_str(text).map_err(|e| crate::Error::Hcl(e.to_string()))?;
-
     let mut b = Builder::default();
-    for block in resource_blocks(&body) {
-        let rtype = block.labels.first().map(label_str).unwrap_or_default();
-        let rname = block.labels.get(1).map(label_str).unwrap_or_default();
-        if !rtype.is_empty() && !rname.is_empty() {
-            b.resource(rtype, rname, block.body());
-        }
-    }
+    add_blocks(&mut b, &body);
     Ok(b.build(project_name))
 }
 
-fn resource_blocks(body: &Body) -> impl Iterator<Item = &Block> {
-    body.iter().filter_map(|s| match s {
-        Structure::Block(bl) if bl.identifier.as_str() == "resource" => Some(bl),
-        _ => None,
-    })
+/// Build a baseline from many Terraform documents, **skipping any that don't
+/// parse** (template files with placeholders, or HCL features the parser doesn't
+/// support). Returns the model and the number of skipped documents — real repos
+/// shouldn't fail wholesale because one file is unparseable.
+pub fn from_terraform_docs<'a>(
+    docs: impl IntoIterator<Item = &'a str>,
+    project_name: &str,
+) -> (Otm, usize) {
+    let mut b = Builder::default();
+    let mut skipped = 0;
+    for text in docs {
+        match hcl::from_str::<Body>(text) {
+            Ok(body) => add_blocks(&mut b, &body),
+            Err(_) => skipped += 1,
+        }
+    }
+    (b.build(project_name), skipped)
+}
+
+fn add_blocks(b: &mut Builder, body: &Body) {
+    for structure in body.iter() {
+        let Structure::Block(bl) = structure else {
+            continue;
+        };
+        match bl.identifier.as_str() {
+            "resource" => {
+                let rtype = bl.labels.first().map(label_str).unwrap_or_default();
+                let rname = bl.labels.get(1).map(label_str).unwrap_or_default();
+                if !rtype.is_empty() && !rname.is_empty() {
+                    b.resource(rtype, rname, bl.body());
+                }
+            }
+            // Module calls are where most real infra lives — model each as a
+            // component (type inferred from its name + source).
+            "module" => {
+                if let Some(name) = bl.labels.first().map(label_str).filter(|n| !n.is_empty()) {
+                    let source = attr_str(bl.body(), "source").unwrap_or_default();
+                    b.module(name, source);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Default)]
@@ -44,6 +75,20 @@ struct Builder {
 }
 
 impl Builder {
+    /// A module call becomes a component; its type is inferred from name + source.
+    fn module(&mut self, name: &str, source: &str) {
+        let id = sanitize_id(&format!("module-{name}"));
+        let kind = module_type(name, source);
+        let store = is_datastore(kind);
+        self.has_db |= store;
+        self.put(
+            &id,
+            &format!("module.{name}"),
+            kind,
+            if store { TZ_DATA } else { TZ_INTERNAL },
+        );
+    }
+
     fn resource(&mut self, rtype: &str, rname: &str, body: &Body) {
         let id = sanitize_id(&format!("{rtype}-{rname}"));
         let display = format!("{rtype}.{rname}");
@@ -160,6 +205,8 @@ fn classify(rtype: &str) -> Option<Kind> {
         "aws_dynamodb_table",
         "google_sql_database_instance",
         "google_bigtable_instance",
+        "google_spanner_instance",
+        "google_firestore_database",
         "azurerm_postgresql_server",
         "azurerm_postgresql_flexible_server",
         "azurerm_mysql_server",
@@ -174,8 +221,12 @@ fn classify(rtype: &str) -> Option<Kind> {
         "aws_s3_bucket",
         "google_redis_instance",
         "google_storage_bucket",
+        "google_secret_manager_secret",
+        "google_kms_key_ring",
+        "kubernetes_secret",
         "azurerm_redis_cache",
         "azurerm_storage_account",
+        "azurerm_key_vault",
     ];
     const QUEUES: &[&str] = &[
         "aws_sqs_queue",
@@ -202,6 +253,9 @@ fn classify(rtype: &str) -> Option<Kind> {
         "google_compute_instance",
         "google_cloud_run_service",
         "google_cloud_run_v2_service",
+        "helm_release",
+        "kubernetes_deployment",
+        "kubernetes_stateful_set",
         "azurerm_linux_virtual_machine",
         "azurerm_windows_virtual_machine",
         "azurerm_virtual_machine",
@@ -219,6 +273,71 @@ fn classify(rtype: &str) -> Option<Kind> {
         Some(Kind::Compute)
     } else {
         None
+    }
+}
+
+/// Infer a component type for a module call from its name + source path.
+fn module_type(name: &str, source: &str) -> &'static str {
+    let s = format!("{name} {source}").to_lowercase();
+    let has = |kws: &[&str]| kws.iter().any(|k| s.contains(k));
+    if has(&[
+        "postgres",
+        "mysql",
+        "spanner",
+        "cloudsql",
+        "cloud-sql",
+        "bigtable",
+        "firestore",
+        "database",
+        "dynamodb",
+        "rds",
+        "-db",
+        "db-",
+    ]) {
+        "database"
+    } else if has(&[
+        "redis",
+        "memcache",
+        "memorystore",
+        "cache",
+        "bucket",
+        "storage",
+        "gcs",
+        "s3",
+        "secret",
+        "kms",
+        "vault",
+        "backup",
+    ]) {
+        "data-store"
+    } else if has(&[
+        "pubsub",
+        "pub-sub",
+        "kafka",
+        "queue",
+        "topic",
+        "sqs",
+        "servicebus",
+        "eventhub",
+    ]) {
+        "message-queue"
+    } else if has(&[
+        "gke",
+        "cluster",
+        "kubernetes",
+        "k8s",
+        "cloudrun",
+        "cloud-run",
+        "appengine",
+        "apigee",
+        "gateway",
+        "ingress",
+        "loadbalancer",
+        "load-balancer",
+    ]) {
+        "web-service"
+    } else {
+        "process"
     }
 }
 

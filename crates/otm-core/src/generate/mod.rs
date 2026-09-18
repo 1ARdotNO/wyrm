@@ -14,7 +14,7 @@ pub mod terraform;
 pub use compose::from_compose;
 pub use kubernetes::from_manifests;
 #[cfg(feature = "terraform")]
-pub use terraform::from_terraform;
+pub use terraform::{from_terraform, from_terraform_docs};
 
 use crate::model::{Component, Dataflow, Otm, Parent, TrustRisk, TrustZone};
 use std::collections::{BTreeMap, BTreeSet};

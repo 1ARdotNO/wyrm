@@ -251,13 +251,22 @@ fn cmd_init(
 
     let text = read_source(&source)?;
     let mut otm = if looks_like_terraform(&text) {
-        otm_core::generate::from_terraform(&text, &project)
+        // Parse each .tf independently so one unparseable file (a template with
+        // placeholders, or unsupported HCL) doesn't abort the whole scan.
+        let docs = collect_docs(&source, &["tf"])?;
+        let (otm, skipped) =
+            otm_core::generate::from_terraform_docs(docs.iter().map(String::as_str), &project);
+        if skipped > 0 {
+            eprintln!(
+                "note: skipped {skipped} unparseable .tf file(s) (placeholders / unsupported HCL)."
+            );
+        }
+        otm
     } else if looks_like_k8s(&text) {
-        otm_core::generate::from_manifests(&text, &project)
+        otm_core::generate::from_manifests(&text, &project).map_err(|e| e.to_string())?
     } else {
-        otm_core::generate::from_compose(&text, &project)
-    }
-    .map_err(|e| e.to_string())?;
+        otm_core::generate::from_compose(&text, &project).map_err(|e| e.to_string())?
+    };
 
     let stdout = matches!(output.as_deref(), Some(p) if p.as_os_str() == "-");
     let dest = (!stdout).then(|| {
@@ -340,6 +349,23 @@ fn walk_ext(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) -> Result<(), Str
         }
     }
     Ok(())
+}
+
+/// Read a file, or every matching file in a directory tree, as individual docs
+/// (so each can be parsed independently and failures isolated).
+fn collect_docs(source: &Path, exts: &[&str]) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    if source.is_dir() {
+        walk_ext(source, exts, &mut files)?;
+        files.sort();
+    } else {
+        files.push(source.to_path_buf());
+    }
+    let mut docs = Vec::with_capacity(files.len());
+    for f in files {
+        docs.push(std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?);
+    }
+    Ok(docs)
 }
 
 /// Read a source file, or concatenate a directory into one stream. A directory of

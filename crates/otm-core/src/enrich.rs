@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 struct DataFile {
     #[serde(default)]
     assets: Vec<Asset>,
+    /// Fully-specified controls (with `appliesTo`/`riskReduction`/`addresses`).
+    #[serde(default)]
+    mitigations: Vec<Mitigation>,
     #[serde(default)]
     resources: BTreeMap<String, ResourceData>,
 }
@@ -45,6 +48,13 @@ pub fn enrich(otm: &mut Otm, yaml: &str) -> Result<(), crate::Error> {
     for a in data.assets {
         if !otm.assets.iter().any(|x| x.id == a.id) {
             otm.assets.push(a);
+        }
+    }
+
+    for m in data.mitigations {
+        match otm.mitigations.iter_mut().find(|x| x.id == m.id) {
+            Some(existing) => *existing = m,
+            None => otm.mitigations.push(m),
         }
     }
 
@@ -104,15 +114,22 @@ pub fn enrich(otm: &mut Otm, yaml: &str) -> Result<(), crate::Error> {
             }
         }
 
+        // A resource's named controls attach to that component so `analyze`
+        // downgrades its findings (default one severity step, per Mitigation docs).
         for m in &rd.mitigations {
             let mid = sanitize(m);
-            if !otm.mitigations.iter().any(|x| x.id == mid) {
-                otm.mitigations.push(Mitigation {
+            match otm.mitigations.iter_mut().find(|x| x.id == mid) {
+                Some(existing) => {
+                    if !existing.applies_to.contains(&cid) {
+                        existing.applies_to.push(cid.clone());
+                    }
+                }
+                None => otm.mitigations.push(Mitigation {
                     id: mid,
                     name: m.clone(),
-                    description: None,
-                    risk_reduction: None,
-                });
+                    applies_to: vec![cid.clone()],
+                    ..Default::default()
+                }),
             }
         }
     }

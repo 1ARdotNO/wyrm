@@ -152,15 +152,25 @@ pub struct Threat {
     pub categories: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mitigation {
     pub id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// How much this control lowers risk on its targets, 0–100. Absent ⇒ 50
+    /// (one severity step) once it targets something; 100 resolves the finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_reduction: Option<u8>,
+    /// Component/dataflow ids this control protects. Empty ⇒ documentary only,
+    /// so an unlinked control never silently suppresses a finding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applies_to: Vec<String>,
+    /// Rule ids this control neutralizes (e.g. `WYRM-T003`). Empty ⇒ every
+    /// finding on the targets — keeps a WAF from muting an encryption finding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub addresses: Vec<String>,
 }
 
 impl Otm {

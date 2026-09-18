@@ -62,7 +62,7 @@
       <tr><td><code>components</code></td><td>Services, datastores, gateways, identities — the nodes</td><td><code>parent.trustZone</code> → a zone · <code>assets</code> → assets</td><td>init</td></tr>
       <tr><td><code>assets</code></td><td>The data worth protecting, with CIA ratings 0–100</td><td>referenced by components &amp; dataflows</td><td><strong>you</strong> (sensitivity isn't in infra)</td></tr>
       <tr><td><code>dataflows</code></td><td>Traffic between components — the edges. Tags like <code>tls</code> mark encryption</td><td><code>source</code>/<code>destination</code> → components · <code>assets</code> → assets</td><td>init (compose/k8s) · <strong>you</strong> (Terraform, via <code>flows:</code>)</td></tr>
-      <tr><td><code>mitigations</code></td><td>Controls that reduce risk (WAF, auth, encryption)</td><td>—</td><td>init (detected WAF/Armor) · you</td></tr>
+      <tr><td><code>mitigations</code></td><td>Controls that reduce risk (WAF, auth, encryption). Link one with <code>appliesTo</code> (element ids) + <code>riskReduction</code> 0–100 and <code>analyze</code> down-ranks matching findings — 100 resolves them. <code>addresses</code> scopes it to specific rules so a WAF can't mute an encryption finding</td><td><code>appliesTo</code> → components/dataflows</td><td>init (detected WAF/Armor, untargeted) · you (link + rate)</td></tr>
       <tr><td><code>threats</code></td><td>Manually-declared threats. <strong>Findings are NOT here</strong> — <code>analyze</code> computes those</td><td>—</td><td>rarely used; usually <code>[]</code></td></tr>
     </tbody>
   </table>

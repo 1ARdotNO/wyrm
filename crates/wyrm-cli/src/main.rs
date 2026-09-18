@@ -38,6 +38,10 @@ enum Command {
         /// Overwrite an existing model instead of merging into it.
         #[arg(long)]
         force: bool,
+        /// Exclude generated elements whose id/name matches a pattern (repeatable).
+        /// `iam` is a shortcut for identity/access/policy noise.
+        #[arg(long)]
+        exclude: Vec<String>,
     },
     /// Check structural integrity of model(s) (references, duplicate ids).
     Validate(Targets),
@@ -136,7 +140,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             output,
             name,
             force,
-        } => cmd_init(from, output, name, force),
+            exclude,
+        } => cmd_init(from, output, name, force, exclude),
         Command::Validate(t) => cmd_validate(&resolve(&t.paths)?),
         Command::Analyze {
             targets,
@@ -227,6 +232,7 @@ fn cmd_init(
     output: Option<PathBuf>,
     name: Option<String>,
     force: bool,
+    exclude: Vec<String>,
 ) -> Result<ExitCode, String> {
     let source = match from {
         Some(p) => p,
@@ -267,6 +273,16 @@ fn cmd_init(
     } else {
         otm_core::generate::from_compose(&text, &project).map_err(|e| e.to_string())?
     };
+
+    // Strip excluded noise from the generated topology (before merge, so any IAM
+    // the reviewer hand-annotates is never removed).
+    if !exclude.is_empty() {
+        let patterns: Vec<String> = exclude
+            .iter()
+            .flat_map(|t| otm_core::generate::expand_exclude(t))
+            .collect();
+        otm_core::generate::exclude(&mut otm, &patterns);
+    }
 
     let stdout = matches!(output.as_deref(), Some(p) if p.as_os_str() == "-");
     let dest = (!stdout).then(|| {

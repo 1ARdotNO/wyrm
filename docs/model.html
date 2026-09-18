@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wyrm — the model (OTM concepts)</title>
+<meta name="description" content="How an Open Threat Model fits together: project, trust zones, assets, components, dataflows, threats, and mitigations — what each is, how they reference each other, and who fills them in." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap navwrap">
+    <a class="brand" href="index.html">🐉 wyrm</a>
+    <span class="navlinks">
+      <a href="index.html">Home</a>
+      <a href="model.html" class="active">Model</a>
+      <a href="detect.html">Auto-detection</a>
+      <a href="editors.html">Editors</a>
+      <a href="ai.html">AI</a>
+      <a href="index.html#ci">CI</a>
+      <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header class="subhero">
+  <div class="wrap">
+    <h1>The model</h1>
+    <p class="lede">
+      A wyrm threat model is an <a href="https://github.com/iriusrisk/OpenThreatModel">Open Threat
+      Model (OTM)</a> file — seven kinds of object that reference each other. Here's what each is,
+      how they connect, and — the part that trips people up — <strong>who fills each one in</strong>.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section>
+  <h2>Who fills what</h2>
+  <p>Three sources populate the model, and it's worth knowing which is which:</p>
+  <ul class="principles">
+    <li><strong>Auto-detected</strong> by <code>wyrm init</code> — the structure (components, trust
+      zones, and — where the source allows — dataflows and control mitigations).</li>
+    <li><strong>You annotate</strong> — the context infra can't encode: which data is sensitive, what
+      talks to what, how access is provisioned. Via <a href="detect.html#annotate">annotations</a>
+      (<code>.threatmodel/data.yaml</code> or inline comments) or by editing the model.</li>
+    <li><strong>Computed by <code>wyrm analyze</code></strong> — the findings. These are
+      <em>derived</em> from everything above and the rule catalogue; they are <strong>not stored in
+      the file</strong>, so they're never stale.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>The seven objects</h2>
+  <table class="cmp">
+    <thead><tr><th>Object</th><th>What it is</th><th>References</th><th>Filled by</th></tr></thead>
+    <tbody>
+      <tr><td><code>project</code></td><td>Name/owner of the system being modeled</td><td>—</td><td>init</td></tr>
+      <tr><td><code>trustZones</code></td><td>Security boundaries, each with a <code>trustRating</code> 0–100 (internet≈10, private≈80)</td><td>—</td><td>init (network/zone resources)</td></tr>
+      <tr><td><code>components</code></td><td>Services, datastores, gateways, identities — the nodes</td><td><code>parent.trustZone</code> → a zone · <code>assets</code> → assets</td><td>init</td></tr>
+      <tr><td><code>assets</code></td><td>The data worth protecting, with CIA ratings 0–100</td><td>referenced by components &amp; dataflows</td><td><strong>you</strong> (sensitivity isn't in infra)</td></tr>
+      <tr><td><code>dataflows</code></td><td>Traffic between components — the edges. Tags like <code>tls</code> mark encryption</td><td><code>source</code>/<code>destination</code> → components · <code>assets</code> → assets</td><td>init (compose/k8s) · <strong>you</strong> (Terraform, via <code>flows:</code>)</td></tr>
+      <tr><td><code>mitigations</code></td><td>Controls that reduce risk (WAF, auth, encryption)</td><td>—</td><td>init (detected WAF/Armor) · you</td></tr>
+      <tr><td><code>threats</code></td><td>Manually-declared threats. <strong>Findings are NOT here</strong> — <code>analyze</code> computes those</td><td>—</td><td>rarely used; usually <code>[]</code></td></tr>
+    </tbody>
+  </table>
+  <p class="note">So an empty <code>assets: []</code> / <code>dataflows: []</code> on a fresh Terraform
+  baseline is expected — Terraform describes resources, not sensitivity or traffic. That's the
+  <a href="detect.html#annotate">annotation</a> step. And <code>threats: []</code> stays empty on
+  purpose: your threats live in <code>wyrm analyze</code>, computed fresh every run.</p>
+</section>
+
+<section>
+  <h2>How they connect</h2>
+  <pre class="mermaid">
+flowchart LR
+  P["project"] --- Z["trustZones"]
+  Z -->|contains| C["components"]
+  C -->|source / destination| D["dataflows"]
+  A["assets"] -.->|processed / stored by| C
+  A -.->|carried on| D
+  M["mitigations"] -.->|reduce risk on| D
+  T["threats = computed by analyze,\nnot stored in the file"]
+  classDef you stroke:#ffd24d,stroke-width:2px;
+  class A,D you
+  classDef derived stroke:#5db0ff,stroke-dasharray:4;
+  class T derived
+      </pre>
+  <p class="note"><span style="color:#ffd24d">Amber</span> = the bits you supply (assets, and — for
+  Terraform — dataflows). <span style="color:#5db0ff">Blue</span> = derived, never written to the file.</p>
+</section>
+
+<section>
+  <h2>How a finding happens</h2>
+  <p>A rule reads the graph: e.g. <em>a <code>dataflow</code> whose <code>source</code> and
+  <code>destination</code> live in different <code>trustZones</code>, carrying an <code>asset</code>
+  with high confidentiality, with no <code>tls</code> tag</em> → <strong>WYRM-T001</strong>. Every
+  input to that sentence is an object above. Miss the asset (sensitivity) or the dataflow (traffic)
+  and the rule can't fire — which is why the annotation step matters, and why a bare Terraform
+  inventory reports nothing until you add context.</p>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · MIT
+  </div>
+</footer>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'strict', themeVariables: { fontSize: '16px' } });
+</script>
+</body>
+</html>

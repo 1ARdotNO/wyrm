@@ -6,7 +6,7 @@
 //! become internal dataflows. TLS on an Ingress/Gateway tags the flow encrypted.
 
 use super::*;
-use crate::model::{Component, Dataflow, Otm, Parent, Project};
+use crate::model::{Component, Dataflow, Mitigation, Otm, Parent, Project};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -69,6 +69,36 @@ pub fn from_manifests(yaml: &str, project_name: &str) -> Result<Otm, crate::Erro
         b.virtual_service(r);
     }
 
+    // GKE IAP: a Service referencing a BackendConfig with `iap.enabled: true` is
+    // fronted by the Google-managed auth gate. Correlate and link the mitigation.
+    let iap_configs: BTreeSet<String> = resources
+        .iter()
+        .filter(|r| r.kind.as_deref() == Some("BackendConfig"))
+        .filter(|r| {
+            r.spec
+                .get("iap")
+                .and_then(|i| i.get("enabled"))
+                .and_then(Yaml::as_bool)
+                == Some(true)
+        })
+        .filter_map(|r| r.metadata.name.clone())
+        .collect();
+    if !iap_configs.is_empty() {
+        for r in resources
+            .iter()
+            .filter(|r| r.kind.as_deref() == Some("Service"))
+        {
+            if let Some(name) = &r.metadata.name {
+                if backend_config_refs(&r.metadata.annotations)
+                    .iter()
+                    .any(|c| iap_configs.contains(c))
+                {
+                    b.iap_gate(&sanitize_id(name));
+                }
+            }
+        }
+    }
+
     Ok(b.build(project_name))
 }
 
@@ -76,6 +106,7 @@ pub fn from_manifests(yaml: &str, project_name: &str) -> Result<Otm, crate::Erro
 struct Builder {
     components: BTreeMap<String, Component>,
     dataflows: Vec<Dataflow>,
+    mitigations: Vec<Mitigation>,
     has_edge: bool,
     has_db: bool,
 }
@@ -96,6 +127,26 @@ impl Builder {
                 attributes: Default::default(),
             },
         );
+    }
+
+    /// Link an IAP auth-gate mitigation to a service (and its ingress flow, if any).
+    fn iap_gate(&mut self, service_id: &str) {
+        let flow = format!("df-ingress-{service_id}");
+        let mut applies_to = vec![service_id.to_string()];
+        if self.dataflows.iter().any(|d| d.id == flow) {
+            applies_to.push(flow);
+        }
+        self.mitigations.push(Mitigation {
+            id: format!("iap-{service_id}"),
+            name: "Identity-Aware Proxy (Google-managed auth gate)".to_string(),
+            description: Some(
+                "IAP blocks the backend until the caller is authenticated and holds roles/iap.httpsResourceAccessor. Verify the binding is not allUsers/allAuthenticatedUsers."
+                    .to_string(),
+            ),
+            risk_reduction: Some(80),
+            applies_to,
+            addresses: vec!["WYRM-T003".to_string(), "WYRM-T005".to_string()],
+        });
     }
 
     /// Add a placeholder for a referenced-but-undefined service.
@@ -280,9 +331,28 @@ impl Builder {
             dataflows: self.dataflows,
             assets: Vec::new(),
             threats: Vec::new(),
-            mitigations: Vec::new(),
+            mitigations: self.mitigations,
         }
     }
+}
+
+/// Service names of the BackendConfigs a Service's `cloud.google.com/backend-config`
+/// annotation points at (shapes: `{"default":"cfg"}` and `{"ports":{"80":"cfg"}}`).
+fn backend_config_refs(annotations: &BTreeMap<String, String>) -> Vec<String> {
+    let Some(raw) = annotations.get("cloud.google.com/backend-config") else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_yaml_ng::from_str::<Yaml>(raw) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if let Some(def) = v.get("default").and_then(Yaml::as_str) {
+        out.push(def.to_string());
+    }
+    if let Some(ports) = v.get("ports").and_then(Yaml::as_mapping) {
+        out.extend(ports.values().filter_map(Yaml::as_str).map(str::to_string));
+    }
+    out
 }
 
 fn is_istio(r: &Resource) -> bool {
@@ -496,5 +566,38 @@ spec:
                 .iter()
                 .any(|d| d.source == "public-gw" && d.destination == "reviews")
         );
+    }
+
+    #[test]
+    fn backendconfig_iap_links_auth_gate_to_service() {
+        let manifests = r#"
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: iap-config
+spec:
+  iap:
+    enabled: true
+    oauth2ClientSecret: { secretName: my-secret }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  annotations:
+    cloud.google.com/backend-config: '{"default":"iap-config"}'
+spec:
+  type: NodePort
+  ports: [{ port: 8080 }]
+"#;
+        let otm = from_manifests(manifests, "gke").unwrap();
+        let iap = otm
+            .mitigations
+            .iter()
+            .find(|m| m.id == "iap-web")
+            .expect("IAP mitigation for the gated service");
+        assert_eq!(iap.risk_reduction, Some(80));
+        assert!(iap.applies_to.iter().any(|t| t == "web"));
+        assert!(iap.applies_to.iter().any(|t| t == "df-ingress-web"));
     }
 }

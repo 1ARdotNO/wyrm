@@ -46,6 +46,8 @@
 wyrm init --from k8s/               # a directory of Kubernetes manifests
 wyrm init --from main.tf -o -       # print to stdout
 wyrm init --from tfplan.json        # a Terraform plan (fully expands modules)
+wyrm init --from ./chart            # a Helm chart (rendered via `helm template`)
+wyrm init --from ./overlay          # a Kustomize overlay (rendered via kustomize)
 wyrm analyze                        # then find the threats in the baseline</pre>
 
   <div class="panel" style="padding:16px;margin:14px 0">

@@ -754,14 +754,19 @@ impl App {
                         );
                         if let Some(base) = f.base_severity {
                             ui.label(
-                                RichText::new(format!("↓ from {}", sev_label(base)))
+                                RichText::new(format!("(was {})", sev_label(base)))
                                     .color(theme::YELLOW)
                                     .small(),
                             );
                         }
                     });
                     // Click a finding → jump to its element in the tree.
-                    if r.response.interact(Sense::click()).clicked() {
+                    let resp = r
+                        .response
+                        .interact(Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("click to reveal in tree");
+                    if resp.clicked() {
                         if let Some(sel) = self.locate(&f.element_id) {
                             acts.push(Act::Reveal(sel));
                         }
@@ -1070,8 +1075,11 @@ impl App {
         const TOP: f32 = 44.0;
         const LEFT: f32 = 14.0;
 
+        // Worst finding severity per element id, so the diagram shows risk.
+        let worst = self.worst_by_element();
+
         let mut col_y = vec![TOP; ncols];
-        let mut nodes: Vec<(usize, Rect, String, String)> = Vec::new();
+        let mut nodes: Vec<(usize, Rect, String, String, Option<Severity>)> = Vec::new();
         let mut centers: HashMap<String, Pos2> = HashMap::new();
         for (i, c) in self.otm.components.iter().enumerate() {
             if !(passes(&c.name, &filter) || passes(&c.kind, &filter)) {
@@ -1089,18 +1097,30 @@ impl App {
             let rect = Rect::from_min_size(egui::pos2(x, y), egui::vec2(NW, NH));
             col_y[col] += NH + VGAP;
             centers.insert(c.id.clone(), rect.center());
-            nodes.push((i, rect, c.kind.clone(), c.name.clone()));
+            nodes.push((
+                i,
+                rect,
+                c.kind.clone(),
+                c.name.clone(),
+                worst.get(&c.id).copied(),
+            ));
         }
-        // Edges within the visible set.
-        let edges: Vec<(Pos2, Pos2, bool)> = self
+        // Edges within the visible set — colored by finding severity if any.
+        let edges: Vec<(Pos2, Pos2, Color32)> = self
             .otm
             .dataflows
             .iter()
             .filter_map(|d| {
                 let a = centers.get(&d.source)?;
                 let b = centers.get(&d.destination)?;
-                let enc = d.tags.iter().any(|t| SECURE_TAGS.contains(&t.as_str()));
-                Some((*a, *b, enc))
+                let color = if let Some(sev) = worst.get(&d.id) {
+                    sev_color(*sev)
+                } else if d.tags.iter().any(|t| SECURE_TAGS.contains(&t.as_str())) {
+                    theme::GREEN
+                } else {
+                    theme::MUTED
+                };
+                Some((*a, *b, color))
             })
             .collect();
         let labels: Vec<(f32, String)> = zones
@@ -1142,16 +1162,11 @@ impl App {
                 );
             }
             // edges under nodes
-            for (a, b, enc) in &edges {
-                arrow(
-                    &p,
-                    *a + o,
-                    *b + o,
-                    if *enc { theme::GREEN } else { theme::MUTED },
-                );
+            for (a, b, color) in &edges {
+                arrow(&p, *a + o, *b + o, *color);
             }
             // nodes
-            for (idx, rect, kind, name) in &nodes {
+            for (idx, rect, kind, name, sev) in &nodes {
                 let r = rect.translate(o);
                 let resp = ui.interact(r, ui.make_persistent_id(("node", idx)), Sense::click());
                 let selected = self.sel == Some(Sel::Comp(*idx));
@@ -1159,20 +1174,37 @@ impl App {
                 // type color bar on the left edge
                 let bar = Rect::from_min_max(r.min, egui::pos2(r.min.x + 4.0, r.max.y));
                 p.rect_filled(bar, Rounding::same(2.0), type_color(kind));
+                // a finding? outline in the severity color + a corner dot.
+                if let Some(sev) = sev {
+                    p.rect_stroke(
+                        r,
+                        Rounding::same(6.0),
+                        Stroke::new(1.5_f32, sev_color(*sev)),
+                    );
+                    p.circle_filled(
+                        egui::pos2(r.max.x - 6.0, r.min.y + 6.0),
+                        4.0,
+                        sev_color(*sev),
+                    );
+                }
                 if selected {
                     p.rect_stroke(r, Rounding::same(6.0), Stroke::new(2.0_f32, theme::ACCENT));
                 }
                 p.text(
                     egui::pos2(r.min.x + 10.0, r.center().y),
                     Align2::LEFT_CENTER,
-                    truncate(name, 24),
+                    truncate(name, 22),
                     FontId::proportional(12.5),
                     theme::TEXT,
                 );
                 if resp.clicked() {
                     acts.push(Act::Reveal(Sel::Comp(*idx)));
                 }
-                resp.on_hover_text(format!("{name}  ·  {kind}"));
+                let tip = match sev {
+                    Some(s) => format!("{name}  ·  {kind}\n{} finding", sev_label(*s)),
+                    None => format!("{name}  ·  {kind}"),
+                };
+                resp.on_hover_text(tip);
             }
         });
     }
@@ -1189,6 +1221,21 @@ impl App {
             .filter(|f| f.severity == Severity::High)
             .count();
         (crit, high)
+    }
+
+    /// Worst finding severity per element id (for graph risk indicators).
+    fn worst_by_element(&self) -> HashMap<String, Severity> {
+        let mut m: HashMap<String, Severity> = HashMap::new();
+        for f in &self.findings {
+            m.entry(f.element_id.clone())
+                .and_modify(|s| {
+                    if f.severity > *s {
+                        *s = f.severity;
+                    }
+                })
+                .or_insert(f.severity);
+        }
+        m
     }
 
     fn locate(&self, element_id: &str) -> Option<Sel> {

@@ -290,27 +290,7 @@ fn cmd_init(
     });
 
     let text = read_source(&source)?;
-    let mut otm = if otm_core::generate::looks_like_tfplan(&text) {
-        // `terraform show -json` — fully expanded, so module-nested resources are
-        // all present with their module-scoped addresses (no source descent).
-        otm_core::generate::from_tfplan_json(&text, &project).map_err(|e| e.to_string())?
-    } else if looks_like_terraform(&text) {
-        // Parse each .tf independently so one unparseable file (a template with
-        // placeholders, or unsupported HCL) doesn't abort the whole scan.
-        let docs = collect_docs(&source, &["tf"])?;
-        let (otm, skipped) =
-            otm_core::generate::from_terraform_docs(docs.iter().map(String::as_str), &project);
-        if skipped > 0 {
-            eprintln!(
-                "note: skipped {skipped} unparseable .tf file(s) (placeholders / unsupported HCL)."
-            );
-        }
-        otm
-    } else if looks_like_k8s(&text) {
-        otm_core::generate::from_manifests(&text, &project).map_err(|e| e.to_string())?
-    } else {
-        otm_core::generate::from_compose(&text, &project).map_err(|e| e.to_string())?
-    };
+    let mut otm = build_model(&source, &text, &project)?;
 
     // Strip excluded noise from the generated topology (before merge, so any IAM
     // the reviewer hand-annotates is never removed).
@@ -437,6 +417,62 @@ fn collect_docs(source: &Path, exts: &[&str]) -> Result<Vec<String>, String> {
 /// Read a source file, or concatenate a directory into one stream. A directory of
 /// Terraform (`.tf`) is preferred (joined with newlines); otherwise YAML files are
 /// joined as a multi-document manifest stream.
+/// Build a baseline from a source. A directory holding **both** Terraform and
+/// Kubernetes manifests is imported as one model — k8s workloads are dropped into
+/// the TF cluster's zone so the cluster and what runs on it live together.
+fn build_model(source: &Path, text: &str, project: &str) -> Result<otm_core::model::Otm, String> {
+    use otm_core::generate as g;
+
+    if g::looks_like_tfplan(text) {
+        // `terraform show -json` — fully expanded module-nested resources.
+        return g::from_tfplan_json(text, project).map_err(|e| e.to_string());
+    }
+
+    // Collect each IaC kind present (a dir may carry both TF and k8s).
+    let tf_docs: Vec<String> = if source.is_dir() {
+        collect_docs(source, &["tf"]).unwrap_or_default()
+    } else if looks_like_terraform(text) {
+        vec![text.to_string()]
+    } else {
+        Vec::new()
+    };
+    let k8s_text: Option<String> = if source.is_dir() {
+        let joined = collect_docs(source, &["yaml", "yml"])
+            .unwrap_or_default()
+            .join("\n---\n");
+        looks_like_k8s(&joined).then_some(joined)
+    } else if looks_like_k8s(text) {
+        Some(text.to_string())
+    } else {
+        None
+    };
+
+    let has_tf = tf_docs.iter().any(|d| looks_like_terraform(d));
+
+    let build_tf = |docs: &[String]| {
+        let (otm, skipped) = g::from_terraform_docs(docs.iter().map(String::as_str), project);
+        if skipped > 0 {
+            eprintln!(
+                "note: skipped {skipped} unparseable .tf file(s) (placeholders / unsupported HCL)."
+            );
+        }
+        otm
+    };
+
+    match (has_tf, k8s_text) {
+        (true, Some(k8s)) => {
+            // Cross-link: fold the k8s workloads into the TF model's cluster zone.
+            let tf = build_tf(&tf_docs);
+            let mut k8s = g::from_manifests(&k8s, project).map_err(|e| e.to_string())?;
+            g::place_in_cluster(&tf, &mut k8s);
+            Ok(g::combine(tf, k8s))
+        }
+        (true, None) => Ok(build_tf(&tf_docs)),
+        (false, Some(k8s)) => g::from_manifests(&k8s, project).map_err(|e| e.to_string()),
+        (false, None) => g::from_compose(text, project).map_err(|e| e.to_string()),
+    }
+}
+
 fn read_source(source: &Path) -> Result<String, String> {
     if !source.is_dir() {
         return std::fs::read_to_string(source).map_err(|e| format!("{}: {e}", source.display()));

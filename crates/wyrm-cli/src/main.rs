@@ -308,10 +308,12 @@ fn cmd_init(
         p.is_file().then_some(p)
     });
     if let Some(path) = data_path {
-        let text =
-            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        otm_core::enrich::enrich(&mut otm, &text)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let doc = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        otm_core::enrich::enrich(&mut otm, &doc).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    // Inline `# wyrm:` comments in the Terraform source win last (highest precedence).
+    if looks_like_terraform(&text) {
+        otm_core::enrich::enrich_inline(&mut otm, &text).map_err(|e| e.to_string())?;
     }
 
     let stdout = matches!(output.as_deref(), Some(p) if p.as_os_str() == "-");

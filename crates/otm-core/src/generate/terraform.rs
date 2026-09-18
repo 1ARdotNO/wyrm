@@ -72,6 +72,10 @@ struct Builder {
     mitigations: Vec<Mitigation>,
     has_edge: bool,
     has_db: bool,
+    /// An IAP-gated backend was found anywhere in the config.
+    iap: bool,
+    /// (edge component id, ingress flow id) for HTTPS edges — IAP fronts these.
+    https_edges: Vec<(String, String)>,
 }
 
 impl Builder {
@@ -92,6 +96,11 @@ impl Builder {
     fn resource(&mut self, rtype: &str, rname: &str, body: &Body) {
         let id = sanitize_id(&format!("{rtype}-{rname}"));
         let display = format!("{rtype}.{rname}");
+
+        // IAP on a backend service = a Google-managed auth wall on the HTTPS path.
+        if iap_enabled(rtype, body) {
+            self.iap = true;
+        }
 
         // Edge controls attach nowhere specific here — record them as mitigations.
         if let Some(control) = mitigation_for(rtype) {
@@ -114,7 +123,11 @@ impl Builder {
             Some(Kind::Edge) => {
                 self.put(&id, &display, "web-service", TZ_INTERNAL);
                 if is_internet_facing(rtype, body) {
-                    self.ingress(&id, &display);
+                    let enc = edge_encryption(rtype, body);
+                    let fid = self.ingress(&id, &display, enc);
+                    if enc == Some("tls") {
+                        self.https_edges.push((id.clone(), fid));
+                    }
                 }
             }
             None => {}
@@ -138,17 +151,22 @@ impl Builder {
         );
     }
 
-    fn ingress(&mut self, id: &str, name: &str) {
+    fn ingress(&mut self, id: &str, name: &str, encryption: Option<&str>) -> String {
         self.has_edge = true;
+        // IPSec tunnels and HTTPS/SSL-proxy LBs are encrypted by construction; tag
+        // them so they don't read as cleartext ingress (WYRM-T002 false positive).
+        let tags = encryption.map(|t| vec![t.to_string()]).unwrap_or_default();
+        let fid = format!("df-ingress-{id}");
         self.dataflows.push(Dataflow {
-            id: format!("df-ingress-{id}"),
+            id: fid.clone(),
             name: format!("external request to {name}"),
             source: EXTERNAL.to_string(),
             destination: id.to_string(),
             assets: Vec::new(),
             attributes: Default::default(),
-            tags: Vec::new(),
+            tags,
         });
+        fid
     }
 
     fn build(mut self, project_name: &str) -> Otm {
@@ -164,6 +182,27 @@ impl Builder {
         trust_zones.push(zone(TZ_INTERNAL, "Internal Network", 70));
         if self.has_db {
             trust_zones.push(zone(TZ_DATA, "Data Tier", 85));
+        }
+
+        // IAP fronts the HTTPS ingress path: a managed auth+authz wall. Link it to
+        // the HTTPS edges so it downgrades their spoofing/edge-exposure findings.
+        // It does NOT cover transport (T002) or app-layer bugs — hence not 100.
+        if self.iap && !self.https_edges.is_empty() {
+            let mut targets: Vec<String> = Vec::new();
+            for (cid, fid) in &self.https_edges {
+                targets.push(cid.clone());
+                targets.push(fid.clone());
+            }
+            self.mitigations.push(Mitigation {
+                id: "iap-auth-gate".to_string(),
+                name: "Identity-Aware Proxy (Google-managed auth gate)".to_string(),
+                description: Some(
+                    "IAP blocks the backend until the caller is authenticated and holds roles/iap.httpsResourceAccessor. Verify the IAM binding is not allUsers/allAuthenticatedUsers.".to_string(),
+                ),
+                risk_reduction: Some(80),
+                applies_to: targets,
+                addresses: vec!["WYRM-T003".to_string(), "WYRM-T005".to_string()],
+            });
         }
 
         let mut seen = BTreeSet::new();
@@ -246,6 +285,11 @@ fn classify(rtype: &str) -> Option<Kind> {
         "google_container_cluster",
         "azurerm_lb",
         "azurerm_application_gateway",
+        // VPN edges — internet-facing but the tunnel is encrypted (see is_encrypted_tunnel).
+        "google_compute_vpn_gateway",
+        "google_compute_ha_vpn_gateway",
+        "aws_vpn_gateway",
+        "azurerm_virtual_network_gateway",
     ];
     const COMPUTE: &[&str] = &[
         "aws_instance",
@@ -370,7 +414,64 @@ fn is_internet_facing(rtype: &str, body: &Body) -> bool {
         "azurerm_lb" | "azurerm_application_gateway" => {
             nested_has_attr(body, "frontend_ip_configuration", "public_ip_address_id")
         }
+        // VPN gateways terminate on a public IP; the tunnel itself is encrypted.
+        "google_compute_vpn_gateway"
+        | "google_compute_ha_vpn_gateway"
+        | "aws_vpn_gateway"
+        | "azurerm_virtual_network_gateway" => true,
         _ => false,
+    }
+}
+
+/// The transport-security tag for an edge's ingress flow, if it is encrypted by
+/// construction — so it isn't flagged as cleartext (WYRM-T002 false positive).
+/// Returns `Some("encrypted")` for IPSec/VPN tunnels, `Some("tls")` for HTTPS/SSL
+/// -proxy load balancers, `None` for plain HTTP / unknown (stays flagged).
+/// Detected structurally (protocols, proxy target), never by resource name.
+fn edge_encryption(rtype: &str, body: &Body) -> Option<&'static str> {
+    match rtype {
+        "google_compute_vpn_gateway"
+        | "google_compute_ha_vpn_gateway"
+        | "google_compute_vpn_tunnel"
+        | "aws_vpn_gateway"
+        | "aws_vpn_connection"
+        | "azurerm_virtual_network_gateway" => Some("encrypted"),
+        "google_compute_forwarding_rule" | "google_compute_global_forwarding_rule" => {
+            let proto = attr_str(body, "ip_protocol").unwrap_or("");
+            let ipsec = proto.eq_ignore_ascii_case("ESP") || proto.eq_ignore_ascii_case("AH");
+            let ports = attr_str(body, "port_range")
+                .or_else(|| attr_str(body, "ports"))
+                .unwrap_or("");
+            let ike = ports.contains("500") || ports.contains("4500");
+            let target = attr_str(body, "target").unwrap_or("").to_lowercase();
+            if ipsec || ike || target.contains("vpn") {
+                Some("encrypted")
+            } else if target.contains("https_proxy")
+                || target.contains("ssl_proxy")
+                || ports.contains("443")
+            {
+                Some("tls")
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// True when a backend service has IAP switched on (`iap { enabled = true }`).
+/// A bare `iap {}` also counts — its presence signals intent; `enabled = false`
+/// does not. Only backend-service resources carry the gate.
+fn iap_enabled(rtype: &str, body: &Body) -> bool {
+    if !matches!(
+        rtype,
+        "google_compute_backend_service" | "google_compute_region_backend_service"
+    ) {
+        return false;
+    }
+    match nested_body(body, "iap") {
+        Some(iap) => attr_bool(iap, "enabled") != Some(false),
+        None => false,
     }
 }
 
@@ -475,5 +576,50 @@ resource "google_container_cluster" "gke" {
         assert!(!otm.components.iter().any(|c| c.id.contains("edge")));
         // private GKE control plane → no ingress flow.
         assert!(!otm.dataflows.iter().any(|d| d.destination.contains("gke")));
+    }
+
+    const ENCRYPTED_EDGES: &str = r#"
+resource "google_compute_forwarding_rule" "vpn_esp" {
+  ip_protocol = "ESP"
+}
+resource "google_compute_global_forwarding_rule" "https_lb" {
+  port_range = "443"
+  target     = "google_compute_target_https_proxy.main.id"
+}
+resource "google_compute_global_forwarding_rule" "http_lb" {
+  port_range = "80"
+  target     = "google_compute_target_http_proxy.main.id"
+}
+resource "google_compute_backend_service" "web" {
+  iap {
+    enabled = true
+  }
+}
+"#;
+
+    #[test]
+    fn vpn_and_https_edges_are_encrypted_http_is_not() {
+        let otm = from_terraform(ENCRYPTED_EDGES, "cloud").unwrap();
+        let flow = |needle: &str| otm.dataflows.iter().find(|d| d.destination.contains(needle));
+        // IPSec forwarding rule → encrypted tag.
+        assert!(flow("vpn-esp").unwrap().tags.iter().any(|t| t == "encrypted"));
+        // HTTPS-proxy LB → tls tag; plain HTTP LB → untagged (still flagged).
+        assert!(flow("https-lb").unwrap().tags.iter().any(|t| t == "tls"));
+        assert!(flow("http-lb").unwrap().tags.is_empty());
+    }
+
+    #[test]
+    fn iap_backend_emits_auth_gate_on_https_edges() {
+        let otm = from_terraform(ENCRYPTED_EDGES, "cloud").unwrap();
+        let iap = otm
+            .mitigations
+            .iter()
+            .find(|m| m.id == "iap-auth-gate")
+            .expect("IAP mitigation emitted");
+        assert_eq!(iap.risk_reduction, Some(80));
+        assert!(iap.addresses.iter().any(|r| r == "WYRM-T005"));
+        // Linked to the HTTPS edge (component + flow), not the HTTP or VPN one.
+        assert!(iap.applies_to.iter().any(|t| t.contains("https-lb")));
+        assert!(!iap.applies_to.iter().any(|t| t.contains("http-lb")));
     }
 }

@@ -8,9 +8,9 @@
 //! references, so they're left for review. See `docs/DETECTION.md`.
 
 use super::*;
-use crate::model::{Component, Dataflow, Mitigation, Otm, Parent, Project};
+use crate::model::{Component, Dataflow, Mitigation, Otm, Parent, Project, TrustZone};
 use hcl::{Body, Expression, Structure};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Build a baseline [`Otm`] from a single Terraform document.
 pub fn from_terraform(text: &str, project_name: &str) -> Result<Otm, crate::Error> {
@@ -67,9 +67,11 @@ fn add_blocks(b: &mut Builder, body: &Body) {
 
 #[derive(Default)]
 struct Builder {
-    components: std::collections::BTreeMap<String, Component>,
+    components: BTreeMap<String, Component>,
     dataflows: Vec<Dataflow>,
     mitigations: Vec<Mitigation>,
+    /// Trust zones derived from networks (VPC/subnet) and cluster internals.
+    zones: BTreeMap<String, TrustZone>,
     has_edge: bool,
     has_db: bool,
     /// An IAP-gated backend was found anywhere in the config.
@@ -109,6 +111,18 @@ impl Builder {
     /// Shared resource handling for both HCL and plan-JSON. `id`/`display` carry
     /// the (module-scoped) address; `label` names the resource in mitigations.
     fn add_resource(&mut self, rtype: &str, id: &str, display: &str, label: &str, attrs: Attrs) {
+        // Networks (VPC/subnet) and cluster internals become trust zones — the
+        // segments a threat model reasons over. VPC/subnet are pure zones; a
+        // cluster also defines an internal zone but keeps its control-plane node.
+        if let Some((zid, zname, rating)) = derived_zone(rtype, label) {
+            self.zones
+                .entry(zid.clone())
+                .or_insert_with(|| zone(&zid, &zname, rating));
+            if !is_cluster(rtype) {
+                return;
+            }
+        }
+
         // IAP on a backend service = a Google-managed auth wall on the HTTPS path.
         if iap_enabled(rtype, attrs) {
             self.iap = true;
@@ -195,6 +209,8 @@ impl Builder {
         if self.has_db {
             trust_zones.push(zone(TZ_DATA, "Data Tier", 85));
         }
+        // Networks/subnets/cluster internals discovered in the config.
+        trust_zones.extend(std::mem::take(&mut self.zones).into_values());
 
         // IAP fronts the HTTPS ingress path: a managed auth+authz wall. Link it to
         // the HTTPS edges so it downgrades their spoofing/edge-exposure findings.
@@ -258,7 +274,10 @@ fn classify(rtype: &str) -> Option<Kind> {
         "google_sql_database_instance",
         "google_bigtable_instance",
         "google_spanner_instance",
+        "google_spanner_database",
         "google_firestore_database",
+        "google_bigquery_dataset",
+        "google_redis_cluster",
         "azurerm_postgresql_server",
         "azurerm_postgresql_flexible_server",
         "azurerm_mysql_server",
@@ -275,6 +294,8 @@ fn classify(rtype: &str) -> Option<Kind> {
         "google_storage_bucket",
         "google_secret_manager_secret",
         "google_kms_key_ring",
+        "google_kms_crypto_key",
+        "google_storage_hmac_key",
         "kubernetes_secret",
         "azurerm_redis_cache",
         "azurerm_storage_account",
@@ -295,11 +316,14 @@ fn classify(rtype: &str) -> Option<Kind> {
         "google_compute_global_forwarding_rule",
         "google_compute_forwarding_rule",
         "google_container_cluster",
+        "aws_eks_cluster",
+        "azurerm_kubernetes_cluster",
         "azurerm_lb",
         "azurerm_application_gateway",
-        // VPN edges — internet-facing but the tunnel is encrypted (see is_encrypted_tunnel).
+        // VPN edges — internet-facing but the tunnel is encrypted (see edge_encryption).
         "google_compute_vpn_gateway",
         "google_compute_ha_vpn_gateway",
+        "google_compute_vpn_tunnel",
         "aws_vpn_gateway",
         "azurerm_virtual_network_gateway",
     ];
@@ -310,6 +334,10 @@ fn classify(rtype: &str) -> Option<Kind> {
         "google_compute_instance",
         "google_cloud_run_service",
         "google_cloud_run_v2_service",
+        "google_cloudfunctions_function",
+        "google_cloudfunctions2_function",
+        "google_container_node_pool",
+        "aws_eks_node_group",
         "helm_release",
         "kubernetes_deployment",
         "kubernetes_stateful_set",
@@ -405,6 +433,7 @@ fn mitigation_for(rtype: &str) -> Option<&'static str> {
         "google_compute_security_policy" => Some("Cloud Armor"),
         "azurerm_web_application_firewall_policy" => Some("Azure WAF"),
         "azurerm_network_ddos_protection_plan" => Some("Azure DDoS Protection"),
+        "sigsci_site" => Some("Signal Sciences WAF"),
         _ => None,
     }
 }
@@ -424,6 +453,13 @@ fn is_internet_facing(rtype: &str, a: Attrs) -> bool {
                 .and_then(|n| n.get_bool("enable_private_endpoint"))
                 != Some(true)
         }
+        "aws_eks_cluster" => {
+            // Public API endpoint on by default.
+            a.nested("vpc_config")
+                .and_then(|n| n.get_bool("endpoint_public_access"))
+                != Some(false)
+        }
+        "azurerm_kubernetes_cluster" => a.get_bool("private_cluster_enabled") != Some(true),
         "azurerm_lb" | "azurerm_application_gateway" => a
             .nested("frontend_ip_configuration")
             .is_some_and(|n| n.has("public_ip_address_id")),
@@ -471,6 +507,37 @@ fn edge_encryption(rtype: &str, a: Attrs) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+/// A trust zone a resource *defines*: VPC/subnet are network segments; a managed
+/// cluster also anchors an internal zone for its workloads (see the k8s importer).
+fn derived_zone(rtype: &str, name: &str) -> Option<(String, String, u8)> {
+    let z = |prefix: &str, label: &str, rating: u8| {
+        (
+            sanitize_id(&format!("tz-{prefix}-{name}")),
+            format!("{label}: {name}"),
+            rating,
+        )
+    };
+    match rtype {
+        "google_compute_network" | "aws_vpc" | "azurerm_virtual_network" => {
+            Some(z("net", "VPC", 75))
+        }
+        "google_compute_subnetwork" | "aws_subnet" | "azurerm_subnet" => {
+            Some(z("subnet", "Subnet", 72))
+        }
+        "google_container_cluster" | "aws_eks_cluster" | "azurerm_kubernetes_cluster" => {
+            Some(z("cluster", "Cluster (internal)", 72))
+        }
+        _ => None,
+    }
+}
+
+fn is_cluster(rtype: &str) -> bool {
+    matches!(
+        rtype,
+        "google_container_cluster" | "aws_eks_cluster" | "azurerm_kubernetes_cluster"
+    )
 }
 
 /// True when a backend service has IAP switched on (`iap { enabled = true }`).
@@ -733,6 +800,38 @@ resource "google_compute_backend_service" "web" {
         // HTTPS-proxy LB → tls tag; plain HTTP LB → untagged (still flagged).
         assert!(flow("https-lb").unwrap().tags.iter().any(|t| t == "tls"));
         assert!(flow("http-lb").unwrap().tags.is_empty());
+    }
+
+    #[test]
+    fn networks_and_clusters_become_trust_zones() {
+        let tf = r#"
+resource "google_compute_network" "vpc" {}
+resource "google_compute_subnetwork" "sub" {
+  network = google_compute_network.vpc.id
+}
+resource "google_container_cluster" "gke" {
+  private_cluster_config { enable_private_endpoint = true }
+}
+resource "google_container_node_pool" "np" {
+  cluster = google_container_cluster.gke.id
+}
+"#;
+        let otm = from_terraform(tf, "cloud").unwrap();
+        assert!(crate::validate::is_valid(&crate::validate(&otm)));
+        // VPC / subnet / cluster-internal are trust zones.
+        let zone = |n: &str| otm.trust_zones.iter().any(|z| z.name == n);
+        assert!(zone("VPC: vpc"));
+        assert!(zone("Subnet: sub"));
+        assert!(zone("Cluster (internal): gke"));
+        // Network/subnet are zones only — no component; the cluster keeps its node.
+        assert!(
+            !otm.components
+                .iter()
+                .any(|c| c.id.contains("compute-network"))
+        );
+        assert!(otm.components.iter().any(|c| c.id.contains("gke")));
+        // Node pool is now modeled as compute (was dropped before).
+        assert!(otm.components.iter().any(|c| c.id.contains("node-pool")));
     }
 
     #[test]

@@ -111,7 +111,9 @@ wyrm init --from tfplan.json</pre>
       <tr><td>GCP <code>forwarding_rule</code> <code>EXTERNAL*</code>, public GKE</td><td>internet exposure</td></tr>
       <tr><td>GCP <code>iap {}</code>, <code>master_authorized_networks</code></td><td>mitigation (auth / allowlist)</td></tr>
       <tr><td>Azure public <code>frontend_ip_configuration</code>, <code>azurerm_public_ip</code></td><td>internet-facing frontend</td></tr>
-      <tr><td>VPC / VNet / subnets</td><td>trust zones</td></tr>
+      <tr><td><code>google_compute_network</code> / <code>aws_vpc</code> / <code>azurerm_virtual_network</code></td><td>trust zone (VPC)</td></tr>
+      <tr><td><code>google_compute_subnetwork</code> / <code>aws_subnet</code> / <code>azurerm_subnet</code></td><td>trust zone (subnet segment)</td></tr>
+      <tr><td>GKE / EKS / AKS cluster</td><td>edge control-plane node <em>+</em> a private "Cluster (internal)" zone for its workloads</td></tr>
     </tbody>
   </table>
 

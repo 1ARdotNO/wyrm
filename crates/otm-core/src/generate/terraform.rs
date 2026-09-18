@@ -415,10 +415,9 @@ fn is_internet_facing(rtype: &str, a: Attrs) -> bool {
         "aws_lb" | "aws_alb" | "aws_elb" => a.get_bool("internal") != Some(true),
         "aws_apigatewayv2_api" => a.get_bool("disable_execute_api_endpoint") != Some(true),
         "aws_api_gateway_rest_api" => true,
-        "google_compute_global_forwarding_rule" | "google_compute_forwarding_rule" => {
-            a.get_str("load_balancing_scheme")
-                .is_none_or(|s| s.starts_with("EXTERNAL"))
-        }
+        "google_compute_global_forwarding_rule" | "google_compute_forwarding_rule" => a
+            .get_str("load_balancing_scheme")
+            .is_none_or(|s| s.starts_with("EXTERNAL")),
         "google_container_cluster" => {
             // Public control plane unless explicitly private.
             a.nested("private_cluster_config")
@@ -718,9 +717,19 @@ resource "google_compute_backend_service" "web" {
     #[test]
     fn vpn_and_https_edges_are_encrypted_http_is_not() {
         let otm = from_terraform(ENCRYPTED_EDGES, "cloud").unwrap();
-        let flow = |needle: &str| otm.dataflows.iter().find(|d| d.destination.contains(needle));
+        let flow = |needle: &str| {
+            otm.dataflows
+                .iter()
+                .find(|d| d.destination.contains(needle))
+        };
         // IPSec forwarding rule → encrypted tag.
-        assert!(flow("vpn-esp").unwrap().tags.iter().any(|t| t == "encrypted"));
+        assert!(
+            flow("vpn-esp")
+                .unwrap()
+                .tags
+                .iter()
+                .any(|t| t == "encrypted")
+        );
         // HTTPS-proxy LB → tls tag; plain HTTP LB → untagged (still flagged).
         assert!(flow("https-lb").unwrap().tags.iter().any(|t| t == "tls"));
         assert!(flow("http-lb").unwrap().tags.is_empty());
@@ -757,7 +766,10 @@ resource "google_compute_backend_service" "web" {
             .find(|c| c.name == "module.data.aws_db_instance.main")
             .expect("nested module resource surfaced");
         assert_eq!(db.kind, "database");
-        assert_eq!(db.parent.as_ref().unwrap().trust_zone.as_deref(), Some(TZ_DATA));
+        assert_eq!(
+            db.parent.as_ref().unwrap().trust_zone.as_deref(),
+            Some(TZ_DATA)
+        );
         // The root LB is internet-facing.
         assert!(otm.dataflows.iter().any(|d| d.source == EXTERNAL));
         assert!(looks_like_tfplan(plan));

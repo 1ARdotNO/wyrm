@@ -18,8 +18,36 @@
           "type": "string",
           "default": "wyrm-lsp",
           "description": "Path to the wyrm-lsp language server binary."
+        },
+        "wyrm.guiPath": {
+          "type": "string",
+          "default": "wyrm-gui",
+          "description": "Path to the wyrm-gui editor binary (opened by 'Wyrm: Open in GUI editor')."
         }
       }
+    },
+    "commands": [
+      {
+        "command": "wyrm.openGui",
+        "title": "Wyrm: Open in GUI editor",
+        "icon": "$(edit)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "wyrm.openGui",
+          "when": "resourceFilename =~ /\\.otm\\.ya?ml$/",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "wyrm.openGui",
+          "when": "resourceFilename =~ /\\.otm\\.ya?ml$/",
+          "group": "navigation"
+        }
+      ]
     }
   },
   "scripts": {

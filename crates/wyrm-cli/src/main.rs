@@ -87,6 +87,11 @@ enum Command {
         #[arg(long, short)]
         output: Option<PathBuf>,
     },
+    /// Open a model in the wyrm GUI editor (spawns the `wyrm-gui` binary).
+    Gui {
+        /// Model file to edit. Defaults to the first `.otm.yaml` in `.threatmodel/`.
+        file: Option<PathBuf>,
+    },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -160,6 +165,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             targets,
             output,
         } => cmd_export(to, &resolve(&targets.paths)?, output),
+        Command::Gui { file } => cmd_gui(file),
     }
 }
 
@@ -181,6 +187,29 @@ fn cmd_export(
         eprintln!("Wrote {}.", dest.display());
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Launch the GUI editor on a model. The GUI ships as a separate `wyrm-gui`
+/// binary (heavy native deps), so we spawn it from PATH rather than link it.
+fn cmd_gui(file: Option<PathBuf>) -> Result<ExitCode, String> {
+    let file = match file {
+        Some(f) => f,
+        None => resolve(&[])?
+            .into_iter()
+            .next()
+            .ok_or("no model found; pass a file: wyrm gui path.otm.yaml")?,
+    };
+    let bin = std::env::var("WYRM_GUI_BIN").unwrap_or_else(|_| "wyrm-gui".to_string());
+    match std::process::Command::new(&bin).arg(&file).spawn() {
+        Ok(_) => {
+            eprintln!("Opened {} in the wyrm GUI.", file.display());
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e) => Err(format!(
+            "could not launch `{bin}` ({e}). Install it with `cargo install --path crates/wyrm-gui` \
+             or set WYRM_GUI_BIN to its path."
+        )),
+    }
 }
 
 fn cmd_import(

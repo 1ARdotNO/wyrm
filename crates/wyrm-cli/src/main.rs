@@ -42,6 +42,9 @@ enum Command {
         /// `iam` is a shortcut for identity/access/policy noise.
         #[arg(long)]
         exclude: Vec<String>,
+        /// Annotation file with extra context (default: `.threatmodel/data.yaml`).
+        #[arg(long)]
+        data: Option<PathBuf>,
     },
     /// Check structural integrity of model(s) (references, duplicate ids).
     Validate(Targets),
@@ -141,7 +144,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             name,
             force,
             exclude,
-        } => cmd_init(from, output, name, force, exclude),
+            data,
+        } => cmd_init(from, output, name, force, exclude, data),
         Command::Validate(t) => cmd_validate(&resolve(&t.paths)?),
         Command::Analyze {
             targets,
@@ -233,6 +237,7 @@ fn cmd_init(
     name: Option<String>,
     force: bool,
     exclude: Vec<String>,
+    data: Option<PathBuf>,
 ) -> Result<ExitCode, String> {
     let source = match from {
         Some(p) => p,
@@ -282,6 +287,18 @@ fn cmd_init(
             .flat_map(|t| otm_core::generate::expand_exclude(t))
             .collect();
         otm_core::generate::exclude(&mut otm, &patterns);
+    }
+
+    // Enrich with human-supplied context (annotation file) before merge.
+    let data_path = data.or_else(|| {
+        let p = PathBuf::from(DEFAULT_DIR).join("data.yaml");
+        p.is_file().then_some(p)
+    });
+    if let Some(path) = data_path {
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        otm_core::enrich::enrich(&mut otm, &text)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
     }
 
     let stdout = matches!(output.as_deref(), Some(p) if p.as_os_str() == "-");

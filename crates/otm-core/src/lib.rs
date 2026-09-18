@@ -7,6 +7,7 @@
 //! exactly once.
 
 pub mod canvas;
+pub mod enrich;
 pub mod generate;
 pub mod migrate;
 pub mod model;

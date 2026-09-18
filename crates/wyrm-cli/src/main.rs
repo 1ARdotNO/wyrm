@@ -261,7 +261,11 @@ fn cmd_init(
     });
 
     let text = read_source(&source)?;
-    let mut otm = if looks_like_terraform(&text) {
+    let mut otm = if otm_core::generate::looks_like_tfplan(&text) {
+        // `terraform show -json` — fully expanded, so module-nested resources are
+        // all present with their module-scoped addresses (no source descent).
+        otm_core::generate::from_tfplan_json(&text, &project).map_err(|e| e.to_string())?
+    } else if looks_like_terraform(&text) {
         // Parse each .tf independently so one unparseable file (a template with
         // placeholders, or unsupported HCL) doesn't abort the whole scan.
         let docs = collect_docs(&source, &["tf"])?;

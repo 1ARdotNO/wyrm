@@ -368,6 +368,25 @@ mod tests {
     }
 
     #[test]
+    fn trust_zone_resolves_through_parent_component_chain() {
+        let mut otm = exposed_model();
+        // A child whose parent is the "api" component (not a zone directly).
+        otm.components.push(Component {
+            id: "child".into(),
+            name: "child".into(),
+            kind: "process".into(),
+            parent: Some(Parent {
+                trust_zone: None,
+                component: Some("api".into()),
+            }),
+            assets: ComponentAssets::default(),
+            attributes: Default::default(),
+        });
+        // Walks child → api → edge zone.
+        assert_eq!(otm.trust_zone_of("child"), Some("edge"));
+    }
+
+    #[test]
     fn unlinked_mitigation_does_not_downgrade() {
         let mut otm = exposed_model();
         let mut m = mitigation(Some(100));

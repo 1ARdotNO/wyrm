@@ -100,6 +100,7 @@ impl Builder {
                 name: format!("{control} ({rname})"),
                 description: None,
                 risk_reduction: None,
+                ..Default::default()
             });
             return;
         }

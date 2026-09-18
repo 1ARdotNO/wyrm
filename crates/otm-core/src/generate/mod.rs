@@ -226,6 +226,7 @@ mod tests {
             name: "Edge WAF".into(),
             description: None,
             risk_reduction: Some(80),
+            ..Default::default()
         });
         existing.assets.push(Asset {
             id: "pii".into(),

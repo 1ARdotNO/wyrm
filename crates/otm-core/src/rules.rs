@@ -6,7 +6,7 @@
 //! expressions over its DFD elements; here the equivalent conditions are a small
 //! typed enum evaluated over the OTM graph.
 
-use crate::model::{Component, Dataflow, Otm};
+use crate::model::{Component, Dataflow, Mitigation, Otm};
 use serde::{Deserialize, Serialize};
 
 /// STRIDE category.
@@ -27,6 +27,27 @@ pub enum Severity {
     Medium,
     High,
     Critical,
+}
+
+impl Severity {
+    fn rung(self) -> i8 {
+        match self {
+            Severity::Low => 0,
+            Severity::Medium => 1,
+            Severity::High => 2,
+            Severity::Critical => 3,
+        }
+    }
+
+    /// Step this severity down by `steps` rungs, saturating at `Low`.
+    fn lower(self, steps: i8) -> Severity {
+        match (self.rung() - steps).max(0) {
+            0 => Severity::Low,
+            1 => Severity::Medium,
+            2 => Severity::High,
+            _ => Severity::Critical,
+        }
+    }
 }
 
 /// Which kind of OTM element a rule iterates over.
@@ -83,6 +104,12 @@ pub struct Finding {
     pub element_name: String,
     pub description: String,
     pub mitigation: String,
+    /// Ids of linked mitigations that lowered this finding's severity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mitigated_by: Vec<String>,
+    /// The pre-mitigation severity, present only when a control downgraded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_severity: Option<Severity>,
 }
 
 /// The default catalogue, embedded at build time so the CLI and WASM builds are
@@ -126,10 +153,58 @@ impl ThreatLibrary {
                 }
             }
         }
+        // Apply linked controls before ranking, so severities already reflect
+        // any WAF/auth/encryption mitigation the model records.
+        let mut findings = apply_mitigations(findings, otm);
         // Critical first; stable so catalogue order breaks ties deterministically.
         findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
         findings
     }
+}
+
+/// Down-rank (or resolve) findings that a linked mitigation covers. A mitigation
+/// covers a finding when it targets the finding's element and either addresses
+/// its rule or addresses nothing (⇒ all findings on that element). Reductions on
+/// the same finding sum, capped at 100 — full coverage resolves it outright.
+fn apply_mitigations(findings: Vec<Finding>, otm: &Otm) -> Vec<Finding> {
+    if otm.mitigations.is_empty() {
+        return findings;
+    }
+    let covers = |m: &Mitigation, f: &Finding| {
+        m.applies_to.iter().any(|t| t == &f.element_id)
+            && (m.addresses.is_empty() || m.addresses.iter().any(|r| r == &f.rule_id))
+    };
+    let mut out = Vec::with_capacity(findings.len());
+    for mut f in findings {
+        let linked: Vec<&Mitigation> = otm.mitigations.iter().filter(|m| covers(m, &f)).collect();
+        if linked.is_empty() {
+            out.push(f);
+            continue;
+        }
+        let reduction: u16 = linked
+            .iter()
+            .map(|m| u16::from(m.risk_reduction.unwrap_or(50)))
+            .sum::<u16>()
+            .min(100);
+        if reduction >= 100 {
+            // Fully mitigated — treat as resolved and drop from the report.
+            continue;
+        }
+        let steps = if reduction >= 70 {
+            2
+        } else if reduction >= 40 {
+            1
+        } else {
+            0
+        };
+        if steps > 0 {
+            f.base_severity = Some(f.severity);
+            f.severity = f.severity.lower(steps);
+        }
+        f.mitigated_by = linked.iter().map(|m| m.id.clone()).collect();
+        out.push(f);
+    }
+    out
 }
 
 fn finding_for(rule: &Rule, element_id: &str, element_name: &str) -> Finding {
@@ -142,6 +217,8 @@ fn finding_for(rule: &Rule, element_id: &str, element_name: &str) -> Finding {
         element_name: element_name.to_string(),
         description: rule.description.clone(),
         mitigation: rule.mitigation.clone(),
+        mitigated_by: Vec::new(),
+        base_severity: None,
     }
 }
 
@@ -224,4 +301,93 @@ fn trust_rating(otm: &Otm, tz_id: &str) -> Option<u8> {
         .risk
         .as_ref()?
         .trust_rating
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Asset, AssetRisk, Component, ComponentAssets, Mitigation, Parent, Project, TrustRisk, TrustZone};
+
+    /// An internet-facing component holding sensitive data ⇒ WYRM-T003 (high).
+    fn exposed_model() -> Otm {
+        Otm {
+            otm_version: "0.2.0".into(),
+            project: Project { id: "p".into(), name: "p".into(), owner: None, description: None },
+            trust_zones: vec![TrustZone {
+                id: "edge".into(),
+                name: "edge".into(),
+                risk: Some(TrustRisk { trust_rating: Some(10) }),
+            }],
+            components: vec![Component {
+                id: "api".into(),
+                name: "api".into(),
+                kind: "web-service".into(),
+                parent: Some(Parent { trust_zone: Some("edge".into()), component: None }),
+                assets: ComponentAssets { processed: vec!["pii".into()], stored: vec![] },
+                attributes: Default::default(),
+            }],
+            dataflows: vec![],
+            assets: vec![Asset {
+                id: "pii".into(),
+                name: "pii".into(),
+                risk: Some(AssetRisk { confidentiality: 90, integrity: 0, availability: 0 }),
+            }],
+            threats: vec![],
+            mitigations: vec![],
+        }
+    }
+
+    fn mitigation(reduction: Option<u8>) -> Mitigation {
+        Mitigation {
+            id: "waf".into(),
+            name: "Edge WAF".into(),
+            risk_reduction: reduction,
+            applies_to: vec!["api".into()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn unlinked_mitigation_does_not_downgrade() {
+        let mut otm = exposed_model();
+        let mut m = mitigation(Some(100));
+        m.applies_to.clear(); // documentary only
+        otm.mitigations.push(m);
+        let f = &ThreatLibrary::bundled().analyze(&otm)[0];
+        assert_eq!(f.severity, Severity::High);
+        assert!(f.mitigated_by.is_empty());
+    }
+
+    #[test]
+    fn partial_mitigation_steps_severity_down() {
+        let mut otm = exposed_model();
+        otm.mitigations.push(mitigation(Some(50))); // 40–69 ⇒ one rung
+        let f = &ThreatLibrary::bundled().analyze(&otm)[0];
+        assert_eq!(f.severity, Severity::Medium);
+        assert_eq!(f.base_severity, Some(Severity::High));
+        assert_eq!(f.mitigated_by, vec!["waf".to_string()]);
+    }
+
+    #[test]
+    fn full_mitigation_resolves_finding() {
+        let mut otm = exposed_model();
+        otm.mitigations.push(mitigation(Some(100)));
+        assert!(
+            !ThreatLibrary::bundled()
+                .analyze(&otm)
+                .iter()
+                .any(|f| f.rule_id == "WYRM-T003"),
+            "fully-mitigated finding is resolved"
+        );
+    }
+
+    #[test]
+    fn addresses_scopes_which_rule_is_muted() {
+        let mut otm = exposed_model();
+        let mut m = mitigation(Some(100));
+        m.addresses = vec!["WYRM-T999".into()]; // targets a different rule
+        otm.mitigations.push(m);
+        let f = &ThreatLibrary::bundled().analyze(&otm)[0];
+        assert_eq!(f.severity, Severity::High, "unrelated rule stays full severity");
+    }
 }

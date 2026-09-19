@@ -10,5 +10,5 @@ description = "Native GUI editor for wyrm OTM threat models"
 
 [dependencies]
 otm-core = { path = "../otm-core" }
-eframe = "0.32"
-egui = "0.32"
+eframe = "0.36.2"
+egui = "0.36.2"

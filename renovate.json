@@ -60,6 +60,11 @@
       "description": "Automerge the custom-managed grammar/CDN bumps too.",
       "matchManagers": ["custom.regex"],
       "automerge": true
+    },
+    {
+      "description": "Cap the GUI's egui/eframe below 0.33 — 0.36 is a major API break (App::ui, panel moves, Context::style) needing Rust 1.95. Lift when wyrm-gui is migrated to 0.36 (see task).",
+      "matchPackageNames": ["eframe", "egui"],
+      "allowedVersions": "<0.33.0"
     }
   ]
 }

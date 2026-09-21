@@ -76,6 +76,13 @@ pub enum Predicate {
     ComponentKindIn { kinds: Vec<String> },
     /// Component sitting in a trust zone rated at or below `max_trust` (internet-facing).
     LowTrustZone { max_trust: u8 },
+    /// Component carrying an attribute `tag` — either `"key"` (present) or
+    /// `"key=value"` (exact match). Used for annotated IAM facets like
+    /// `provisioning=manual` or `privilege=high`.
+    HasTag { tag: String },
+    /// Component that is the source of at least `min` dataflows — a proxy for how
+    /// many resources an identity can reach (access fan-out).
+    AccessFanOut { min: usize },
 }
 
 /// One catalogue entry.
@@ -241,7 +248,10 @@ fn eval_dataflow(p: &Predicate, df: &Dataflow, otm: &Otm) -> bool {
             .iter()
             .any(|id| asset_confidentiality(otm, id) >= *min_confidentiality),
         // Component-only predicates never match a dataflow.
-        Predicate::ComponentKindIn { .. } | Predicate::LowTrustZone { .. } => false,
+        Predicate::ComponentKindIn { .. }
+        | Predicate::LowTrustZone { .. }
+        | Predicate::HasTag { .. }
+        | Predicate::AccessFanOut { .. } => false,
     }
 }
 
@@ -260,6 +270,13 @@ fn eval_component(p: &Predicate, c: &Component, otm: &Otm) -> bool {
             .and_then(|p| p.trust_zone.as_deref())
             .and_then(|tz| trust_rating(otm, tz))
             .is_some_and(|rating| rating <= *max_trust),
+        Predicate::HasTag { tag } => match tag.split_once('=') {
+            Some((k, v)) => c.attributes.get(k).map(String::as_str) == Some(v),
+            None => c.attributes.contains_key(tag),
+        },
+        Predicate::AccessFanOut { min } => {
+            otm.dataflows.iter().filter(|d| d.source == c.id).count() >= *min
+        }
         // Dataflow-only predicates never match a component.
         Predicate::CrossesTrustBoundary | Predicate::NotEncrypted => false,
     }
@@ -307,9 +324,68 @@ fn trust_rating(otm: &Otm, tz_id: &str) -> Option<u8> {
 mod tests {
     use super::*;
     use crate::model::{
-        Asset, AssetRisk, Component, ComponentAssets, Mitigation, Parent, Project, TrustRisk,
-        TrustZone,
+        Asset, AssetRisk, Component, ComponentAssets, Dataflow, Mitigation, Parent, Project,
+        TrustRisk, TrustZone,
     };
+
+    fn identity(id: &str, attrs: &[(&str, &str)], assets: Vec<String>) -> Component {
+        Component {
+            id: id.into(),
+            name: id.into(),
+            kind: "identity".into(),
+            parent: Some(Parent {
+                trust_zone: Some("edge".into()),
+                component: None,
+            }),
+            assets: ComponentAssets {
+                processed: assets,
+                stored: vec![],
+            },
+            attributes: attrs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn iam_rules_flag_standing_and_broad_access() {
+        // T006: manually-provisioned human identity touching sensitive data.
+        let mut a = exposed_model();
+        a.components.push(identity(
+            "admin",
+            &[("provisioning", "manual")],
+            vec!["pii".into()],
+        ));
+        assert!(
+            ThreatLibrary::bundled()
+                .analyze(&a)
+                .iter()
+                .any(|f| f.rule_id == "WYRM-T006")
+        );
+
+        // T007: high-privilege identity reaching 5+ resources.
+        let mut b = exposed_model();
+        b.components
+            .push(identity("sa", &[("privilege", "high")], vec![]));
+        for i in 0..5 {
+            b.dataflows.push(Dataflow {
+                id: format!("f{i}"),
+                name: format!("f{i}"),
+                source: "sa".into(),
+                destination: "api".into(),
+                assets: vec![],
+                attributes: Default::default(),
+                tags: vec![],
+            });
+        }
+        assert!(
+            ThreatLibrary::bundled()
+                .analyze(&b)
+                .iter()
+                .any(|f| f.rule_id == "WYRM-T007")
+        );
+    }
 
     /// An internet-facing component holding sensitive data ⇒ WYRM-T003 (high).
     fn exposed_model() -> Otm {

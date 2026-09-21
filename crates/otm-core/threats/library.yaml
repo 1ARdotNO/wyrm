@@ -76,3 +76,39 @@ rules:
       A cross-boundary flow moves data of note but the model records no proof of
       peer identity, so either endpoint could be impersonated (spoofed).
     mitigation: Authenticate both ends of the flow (tokens, mutual TLS) and record the control as a mitigation.
+
+  - id: WYRM-T006
+    name: Standing human access to sensitive data
+    stride: ElevationOfPrivilege
+    severity: high
+    target: component
+    when:
+      - kind: componentKindIn
+        kinds: ["identity"]
+      - kind: hasTag
+        tag: "provisioning=manual"
+      - kind: carriesSensitiveData
+        minConfidentiality: 70
+    description: >-
+      A human identity holds standing (manually provisioned) access to confidential
+      data. Standing access is a persistent attack surface — a lost credential or a
+      former team member is enough — where just-in-time access would not be.
+    mitigation: Move to just-in-time / approval-based access (provisioning=jit or approval) and scope to least privilege.
+
+  - id: WYRM-T007
+    name: Broadly-exposed high-privilege identity
+    stride: ElevationOfPrivilege
+    severity: high
+    target: component
+    when:
+      - kind: componentKindIn
+        kinds: ["identity"]
+      - kind: hasTag
+        tag: "privilege=high"
+      - kind: accessFanOut
+        min: 5
+    description: >-
+      A high-privilege identity — a service account or workload identity — can reach
+      a large pool of resources (5+). One compromise yields broad lateral movement,
+      so this is a high-value target that concentrates blast radius.
+    mitigation: Split into scoped identities per workload, grant least privilege, add workload-identity conditions and access monitoring.

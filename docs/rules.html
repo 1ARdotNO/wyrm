@@ -91,6 +91,30 @@
     · <code>carriesSensitiveData</code> (confidentiality ≥ 40).</p>
     <p class="fix">↳ Authenticate both ends of the flow (tokens, mutual TLS) and record the control as a mitigation.</p>
   </article>
+
+  <article id="WYRM-T006" class="rule">
+    <h3>WYRM-T006 <span class="pill high">high</span> <span class="stride">Elevation of Privilege</span></h3>
+    <p><strong>Standing human access to sensitive data.</strong> A human identity holds
+    standing (manually provisioned) access to confidential data — a persistent attack
+    surface where a lost credential or a former team member is enough.</p>
+    <p class="when">Fires on an <code>identity</code> <em>component</em> when:
+    <code>hasTag provisioning=manual</code> · <code>carriesSensitiveData</code> (confidentiality ≥ 70).</p>
+    <p class="fix">↳ Move to just-in-time / approval-based access (<code>provisioning=jit</code>) and scope to least privilege.</p>
+  </article>
+
+  <article id="WYRM-T007" class="rule">
+    <h3>WYRM-T007 <span class="pill high">high</span> <span class="stride">Elevation of Privilege</span></h3>
+    <p><strong>Broadly-exposed high-privilege identity.</strong> A high-privilege service
+    account / workload identity can reach a large pool of resources (5+). One compromise
+    yields broad lateral movement — it concentrates blast radius.</p>
+    <p class="when">Fires on an <code>identity</code> <em>component</em> when:
+    <code>hasTag privilege=high</code> · <code>accessFanOut</code> ≥ 5 (outgoing dataflows).</p>
+    <p class="fix">↳ Split into scoped identities per workload, grant least privilege, add workload-identity conditions + monitoring.</p>
+  </article>
+  <p class="note">T006/T007 read facets you annotate on an <code>identity</code> component
+  (<code>provisioning</code>, <code>privilege</code>, and its access edges via <code>flows</code>) —
+  see <a href="detect.html#annotate">annotations</a>. IAM is ~99% human-supplied context;
+  <code>wyrm init --exclude iam</code> keeps it out of the auto-generated baseline.</p>
 </section>
 
 <section>
@@ -103,6 +127,8 @@
       <tr><td><code>carriesSensitiveData</code></td><td>either</td><td>touches an asset whose confidentiality ≥ the rule's threshold</td></tr>
       <tr><td><code>componentKindIn</code></td><td>component</td><td>the component's <code>type</code> is one of the listed kinds</td></tr>
       <tr><td><code>lowTrustZone</code></td><td>component</td><td>its zone's <code>trustRating</code> ≤ the rule's max</td></tr>
+      <tr><td><code>hasTag</code></td><td>component</td><td>carries attribute <code>key</code> (present) or <code>key=value</code> (exact) — e.g. <code>provisioning=manual</code></td></tr>
+      <tr><td><code>accessFanOut</code></td><td>component</td><td>is the source of at least <code>min</code> dataflows (how many resources an identity reaches)</td></tr>
     </tbody>
   </table>
 </section>

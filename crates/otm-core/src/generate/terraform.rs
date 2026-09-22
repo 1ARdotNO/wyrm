@@ -251,6 +251,17 @@ impl Builder {
             Some(Kind::Datastore(k)) => {
                 self.has_db = true;
                 self.put(id, display, k, TZ_DATA);
+                // Record at-rest posture so the datastore rules can read it.
+                if let Some(c) = self.components.get_mut(id) {
+                    if datastore_public(rtype, attrs) {
+                        c.attributes
+                            .insert("public".to_string(), "true".to_string());
+                    }
+                    if datastore_encrypted(rtype, attrs) {
+                        c.attributes
+                            .insert("encryption".to_string(), "at-rest".to_string());
+                    }
+                }
             }
             Some(Kind::Compute) => self.put(id, display, "process", TZ_INTERNAL),
             Some(Kind::Edge) => {
@@ -708,6 +719,37 @@ fn is_cluster(rtype: &str) -> bool {
         rtype,
         "google_container_cluster" | "aws_eks_cluster" | "azurerm_kubernetes_cluster"
     )
+}
+
+/// A datastore reachable from the public internet (public IP / public access).
+fn datastore_public(rtype: &str, a: Attrs) -> bool {
+    match rtype {
+        "google_sql_database_instance" => {
+            a.nested("settings")
+                .and_then(|s| s.nested("ip_configuration"))
+                .and_then(|c| c.get_bool("ipv4_enabled"))
+                == Some(true)
+        }
+        "aws_db_instance" | "aws_rds_cluster_instance" => {
+            a.get_bool("publicly_accessible") == Some(true)
+        }
+        "google_storage_bucket" => a.get_str("public_access_prevention") == Some("inherited"),
+        _ => false,
+    }
+}
+
+/// Whether a datastore has encryption at rest. GCP and Azure encrypt every
+/// managed store with provider keys by default, so absence is only meaningful on
+/// AWS (where `storage_encrypted`/SSE is opt-in) or when an explicit key is set.
+fn datastore_encrypted(rtype: &str, a: Attrs) -> bool {
+    if rtype.starts_with("google_") || rtype.starts_with("azurerm_") {
+        return true;
+    }
+    a.has("kms_key_name")
+        || a.has("kms_key_id")
+        || a.get_bool("storage_encrypted") == Some(true)
+        || a.nested("server_side_encryption_configuration").is_some()
+        || a.nested("encryption_configuration").is_some()
 }
 
 /// True when a backend service has IAP switched on (`iap { enabled = true }`).

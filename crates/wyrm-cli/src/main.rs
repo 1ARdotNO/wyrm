@@ -69,6 +69,9 @@ enum Command {
         /// `.threatmodel/rules.yaml` if present).
         #[arg(long)]
         rules: Option<PathBuf>,
+        /// Only report findings at or above this severity (hides low-severity noise).
+        #[arg(long, value_enum)]
+        min_severity: Option<SeverityArg>,
     },
     /// Render a Mermaid data-flow diagram to stdout.
     Diagram(Targets),
@@ -175,6 +178,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             format,
             output,
             rules,
+            min_severity,
         } => cmd_analyze(
             &resolve(&targets.paths)?,
             fail_on.threshold(),
@@ -185,6 +189,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             }),
             output,
             rules,
+            min_severity.map(SeverityArg::threshold),
         ),
         Command::Diagram(t) => cmd_diagram(&resolve(&t.paths)?),
         Command::Import { from, file, output } => cmd_import(from, file, output),
@@ -801,6 +806,7 @@ fn cmd_analyze(
     format: OutputFormat,
     output: Option<PathBuf>,
     rules: Option<PathBuf>,
+    min_severity: Option<Severity>,
 ) -> Result<ExitCode, String> {
     let mut lib = otm_core::ThreatLibrary::bundled();
 
@@ -840,6 +846,9 @@ fn cmd_analyze(
         let mut fs = lib.analyze(&otm);
         otm_core::risk::annotate(&mut fs, &otm, &risk_cfg);
         for f in fs {
+            if min_severity.is_some_and(|min| f.severity < min) {
+                continue;
+            }
             let line = otm_core::sarif::locate_line(&source, &f.element_id);
             located.push((f.clone(), uri.clone(), line));
             all.push(f);
@@ -884,6 +893,34 @@ fn text_report(all: &[Finding]) -> String {
         return "No findings.\n".to_string();
     }
     let mut s = String::new();
+    // Rollup first, so a wall of low-severity findings doesn't bury the serious ones.
+    let count = |sev| all.iter().filter(|f| f.severity == sev).count();
+    let (crit, high, med, low) = (
+        count(Severity::Critical),
+        count(Severity::High),
+        count(Severity::Medium),
+        count(Severity::Low),
+    );
+    let residual = all.iter().filter(|f| f.is_residual()).count();
+    s += &format!(
+        "{} findings — {crit} critical, {high} high, {med} medium, {low} low; {residual} residual (unmitigated high+)\n",
+        all.len()
+    );
+    let mut by_rule: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for f in all {
+        *by_rule.entry(f.rule_id.as_str()).or_default() += 1;
+    }
+    let mut top: Vec<_> = by_rule.into_iter().collect();
+    top.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    let top: Vec<String> = top
+        .iter()
+        .take(3)
+        .map(|(r, n)| format!("{r}×{n}"))
+        .collect();
+    if !top.is_empty() {
+        s += &format!("top rules: {}\n", top.join(", "));
+    }
+    s += "\n";
     for f in all {
         s += &format!(
             "[{}] {:?}  {}  ({})\n    {} — {}\n    ↳ {}\n",

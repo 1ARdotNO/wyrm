@@ -149,3 +149,38 @@ rules:
       so actions across it can't be attributed or investigated after the fact.
       (Scored at full severity only when the model annotates logging elsewhere.)
     mitigation: Enable access/audit logging on both ends (LB logs, VPC flow logs, app audit trail) and tag the flow's logging control.
+
+  - id: WYRM-T009
+    name: Publicly-reachable datastore holding sensitive data
+    stride: InformationDisclosure
+    severity: high
+    target: component
+    when:
+      - kind: componentKindIn
+        kinds: ["database", "data-store", "message-queue"]
+      - kind: carriesSensitiveData
+        minConfidentiality: 70
+      - kind: hasTag
+        tag: public
+    description: >-
+      A datastore holding confidential data is reachable from the public internet
+      (public IP / public access), exposing that data to anyone who can reach it.
+    mitigation: Disable the public endpoint; use private IP / VPC-internal access with an authorized-networks allowlist.
+
+  - id: WYRM-T010
+    name: Sensitive datastore without encryption at rest
+    stride: InformationDisclosure
+    severity: medium
+    target: component
+    when:
+      - kind: componentKindIn
+        kinds: ["database", "data-store"]
+      - kind: carriesSensitiveData
+        minConfidentiality: 70
+      - kind: lacksControl
+        control: encryption
+    description: >-
+      A datastore holding confidential data records no customer-managed or explicit
+      encryption-at-rest control. (Scored at full severity only when the model uses
+      encryption elsewhere; otherwise floored to Low.)
+    mitigation: Enable customer-managed encryption (CMEK/KMS) or the provider's at-rest encryption, and record the control.

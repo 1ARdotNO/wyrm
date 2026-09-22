@@ -81,6 +81,28 @@ components:
 }
 
 #[test]
+fn public_sensitive_datastore_fires_t009_and_encryption_suppresses_t010() {
+    // A datastore holding confidential data, publicly reachable, and unencrypted.
+    let otm = otm_core::parse(
+        "otmVersion: 0.2.0\nproject: { id: p, name: P }\nassets:\n  - { id: a, name: A, risk: { confidentiality: 90 } }\ncomponents:\n  - { id: db, name: db, type: database, assets: { stored: [a] }, attributes: { public: \"true\" } }\n  - { id: enc, name: enc, type: database, assets: { stored: [a] }, attributes: { encryption: at-rest } }\n",
+    )
+    .unwrap();
+    let f = otm_core::ThreatLibrary::bundled().analyze(&otm);
+    assert!(
+        f.iter().any(|x| x.rule_id == "WYRM-T009"
+            && x.element_id == "db"
+            && x.severity == Severity::High),
+        "public sensitive datastore should fire T009 High"
+    );
+    // The encrypted datastore records the control, so T010 must not fire on it.
+    assert!(
+        !f.iter()
+            .any(|x| x.rule_id == "WYRM-T010" && x.element_id == "enc"),
+        "an at-rest-encrypted datastore should not trip T010"
+    );
+}
+
+#[test]
 fn dangling_dataflow_source_is_an_error() {
     let broken = r#"
 otmVersion: 0.2.0

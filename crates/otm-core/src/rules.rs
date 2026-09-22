@@ -335,6 +335,7 @@ fn control_aliases(control: &str) -> &'static [&'static str] {
         "integrity" => &["integrity", "checksum", "signature", "signing"],
         "waf" => &["waf", "armor", "security-policy", "cloudflare"],
         "logging" => &["logging", "audit", "log-sink", "flow-log"],
+        "encryption" => &["encrypt", "kms", "cmek", "sse", "at-rest"],
         _ => &[],
     }
 }

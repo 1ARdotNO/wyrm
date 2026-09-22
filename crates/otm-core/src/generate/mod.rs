@@ -225,7 +225,18 @@ pub fn synthesize_assets(otm: &mut crate::model::Otm) {
     use crate::model::{Asset, AssetRisk};
     let mut new_assets = Vec::new();
     for c in otm.components.iter_mut() {
-        if !is_datastore(&c.kind) || !c.assets.stored.is_empty() {
+        // Only rate real datastore *resources*. A `module.*` box typed a datastore
+        // by name heuristic is a guess — don't let it manufacture asset-driven
+        // findings (its true posture lives in resources we can't see statically).
+        // The display may be scope-qualified (`envs/prod/module.foo`), so test the
+        // last path segment.
+        let is_module_box = c
+            .name
+            .rsplit('/')
+            .next()
+            .unwrap_or(&c.name)
+            .starts_with("module.");
+        if !is_datastore(&c.kind) || !c.assets.stored.is_empty() || is_module_box {
             continue;
         }
         let sensitive = {

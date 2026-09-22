@@ -216,6 +216,17 @@ pub fn combine(mut a: Otm, b: Otm) -> Otm {
     a
 }
 
+/// Record which importer produced each component (`terraform`/`kubernetes`/
+/// `compose`), so cross-source steps (e.g. env-linking k8s workloads to a cluster)
+/// can tell them apart after [`combine`]. Existing values win.
+pub fn stamp_source(otm: &mut Otm, source: &str) {
+    for c in otm.components.iter_mut() {
+        c.attributes
+            .entry("source".to_string())
+            .or_insert_with(|| source.to_string());
+    }
+}
+
 /// Re-parent a Kubernetes model's internal workloads into the Terraform model's
 /// cluster zone, so the k8s components live in the cluster they run on. Applied
 /// only when the TF model defines exactly one cluster zone (unambiguous);

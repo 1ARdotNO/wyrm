@@ -86,6 +86,23 @@ scopes:                                   # for var-based layouts
   </div>
 
   <div class="panel" style="padding:16px;margin:14px 0">
+    <h3 style="margin-top:0">🧩 Multiple sources: one model for the whole system</h3>
+    <p>Pass <code>--from</code> more than once to combine repos into a single model — the Terraform
+    that provisions the clusters and the GitOps repo that deploys onto them, together:</p>
+    <pre class="code">wyrm init --from infra-terraform/ --from gitops-manifests/ -o system.otm.yaml</pre>
+    <p>Each component is tagged with its <code>source</code> (<code>terraform</code>/<code>kubernetes</code>),
+    and Kubernetes workloads are re-homed into the <strong>cluster trust zone of their
+    environment</strong> — so an app lands in the cluster it actually runs on. Clusters and workloads
+    match by env name; reconcile spellings or pin the mapping explicitly in
+    <code>.threatmodel/environments.yaml</code>:</p>
+    <pre class="code">aliases: { production: prod }        # TF says production, ArgoCD says prod
+clusterMapping: { prod: tz-cluster-main }   # or pin it outright</pre>
+    <p>Per-env cluster linking is exact when the Terraform side has concrete clusters (a
+    <code>terraform show -json</code> plan); from raw HCL where clusters live behind module calls,
+    workloads fall back to the single cluster zone if there's one.</p>
+  </div>
+
+  <div class="panel" style="padding:16px;margin:14px 0">
     <h3 style="margin-top:0">🧩 Terraform modules: point wyrm at a plan for full resolution</h3>
     <p>Reading <code>.tf</code> directly, wyrm sees resources inside <em>local</em> modules but can't
     expand <code>count</code>/<code>for_each</code> or reach registry/git modules — the same blind

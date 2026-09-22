@@ -216,6 +216,49 @@ pub fn combine(mut a: Otm, b: Otm) -> Otm {
     a
 }
 
+/// Give every datastore a default-rated asset so the CIA-driven rules and impact
+/// scoring have something to bite on. Without this the importer emits topology but
+/// no sensitivity, so ~two-thirds of the catalogue can never fire and every
+/// finding scores a constant impact. Conservative defaults, flagged for the human
+/// to tune; a component that already declares assets is left untouched.
+pub fn synthesize_assets(otm: &mut crate::model::Otm) {
+    use crate::model::{Asset, AssetRisk};
+    let mut new_assets = Vec::new();
+    for c in otm.components.iter_mut() {
+        if !is_datastore(&c.kind) || !c.assets.stored.is_empty() {
+            continue;
+        }
+        let sensitive = {
+            let hay = format!("{} {}", c.id, c.name).to_lowercase();
+            ["secret", "kms", "vault", "key-ring", "credential"]
+                .iter()
+                .any(|k| hay.contains(k))
+        };
+        // Secrets/keys skew to confidentiality; a database also carries integrity.
+        let (conf, integ, avail) = if sensitive {
+            (90, 80, 60)
+        } else if c.kind == "database" {
+            (80, 80, 70)
+        } else {
+            (70, 60, 60)
+        };
+        let id = format!("asset-{}", c.id);
+        c.assets.stored.push(id.clone());
+        new_assets.push(Asset {
+            id,
+            name: format!("{} data (default rating — tune)", c.name),
+            risk: Some(AssetRisk {
+                confidentiality: conf,
+                integrity: integ,
+                availability: avail,
+            }),
+        });
+    }
+    let have: BTreeSet<String> = otm.assets.iter().map(|a| a.id.clone()).collect();
+    otm.assets
+        .extend(new_assets.into_iter().filter(|a| !have.contains(&a.id)));
+}
+
 /// Record which importer produced each component (`terraform`/`kubernetes`/
 /// `compose`), so cross-source steps (e.g. env-linking k8s workloads to a cluster)
 /// can tell them apart after [`combine`]. Existing values win.
@@ -383,6 +426,28 @@ mod tests {
             otm.components.iter().any(|c| c.id == "db"),
             "real component kept"
         );
+        assert!(crate::validate::is_valid(&crate::validate(&otm)));
+    }
+
+    #[test]
+    fn synthesize_assets_rates_datastores_and_skews_secrets_high() {
+        let mut otm = crate::parse(
+            "otmVersion: 0.2.0\nproject: { id: p, name: P }\ncomponents:\n  - { id: db, name: sql.main, type: database }\n  - { id: sm, name: secret_manager.creds, type: data-store }\n  - { id: web, name: api, type: web-service }\n",
+        )
+        .unwrap();
+        synthesize_assets(&mut otm);
+        let cia = |cid: &str| {
+            otm.components
+                .iter()
+                .find(|c| c.id == cid)
+                .and_then(|c| c.assets.stored.first())
+                .and_then(|aid| otm.assets.iter().find(|a| &a.id == aid))
+                .and_then(|a| a.risk.as_ref())
+                .map(|r| r.confidentiality)
+        };
+        assert_eq!(cia("db"), Some(80)); // database
+        assert_eq!(cia("sm"), Some(90)); // secret store skews high
+        assert_eq!(cia("web"), None); // non-datastore: no asset synthesized
         assert!(crate::validate::is_valid(&crate::validate(&otm)));
     }
 }

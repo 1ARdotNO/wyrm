@@ -351,6 +351,10 @@ fn cmd_init(
     }
     let mut otm = acc.expect("at least one source is always built");
 
+    // Give datastores a default-rated asset so the CIA-driven rules and impact
+    // scoring have something to bite on (tune the ratings after review).
+    otm_core::generate::synthesize_assets(&mut otm);
+
     // Classify each component into a deployment environment, then link workloads to
     // the cluster of the same environment across the combined sources.
     otm_core::environ::classify_environments(&mut otm, &env_cfg);

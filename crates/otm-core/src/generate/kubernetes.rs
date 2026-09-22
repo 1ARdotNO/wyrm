@@ -433,9 +433,11 @@ impl Builder {
             trust_zones.push(zone(TZ_DATA, "Data Tier", 85));
         }
 
-        // A VirtualService can restate a route — dedup dataflows by id.
+        // A VirtualService can restate a route — dedup dataflows by id, and drop
+        // self-loops (an Ingress whose backend sanitizes to its own id).
         let mut seen = BTreeSet::new();
-        self.dataflows.retain(|d| seen.insert(d.id.clone()));
+        self.dataflows
+            .retain(|d| d.source != d.destination && seen.insert(d.id.clone()));
 
         components.sort_by(|a, b| a.id.cmp(&b.id));
         self.dataflows.sort_by(|a, b| a.id.cmp(&b.id));

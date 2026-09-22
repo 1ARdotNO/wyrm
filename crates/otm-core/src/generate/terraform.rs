@@ -643,6 +643,11 @@ fn is_internet_facing(rtype: &str, a: Attrs) -> bool {
 /// -proxy load balancers, `None` for plain HTTP / unknown (stays flagged).
 /// Detected structurally (protocols, proxy target), never by resource name.
 fn edge_encryption(rtype: &str, a: Attrs) -> Option<&'static str> {
+    // A managed Kubernetes control plane (kube-apiserver) is HTTPS/mTLS by
+    // construction — its exposure is an authn/edge concern, never cleartext.
+    if is_cluster(rtype) {
+        return Some("tls");
+    }
     match rtype {
         "google_compute_vpn_gateway"
         | "google_compute_ha_vpn_gateway"

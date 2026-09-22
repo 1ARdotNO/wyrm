@@ -55,9 +55,15 @@ enum Command {
         /// Fail (non-zero exit) if any finding is at or above this severity.
         #[arg(long, value_enum, default_value_t = SeverityArg::High)]
         fail_on: SeverityArg,
-        /// Emit findings as JSON instead of text.
+        /// Emit findings as JSON instead of text (alias for --format json).
         #[arg(long)]
         json: bool,
+        /// Output format for the findings.
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+        /// Write output to a file instead of stdout.
+        #[arg(long, short)]
+        output: Option<PathBuf>,
         /// Extra rules file to add to the bundled catalogue (defaults to
         /// `.threatmodel/rules.yaml` if present).
         #[arg(long)]
@@ -104,6 +110,15 @@ enum ImportFormat {
 #[derive(Copy, Clone, ValueEnum)]
 enum ExportFormat {
     Canvas,
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum OutputFormat {
+    Text,
+    Json,
+    /// SARIF 2.1.0 — for GitHub code scanning and SAST tooling.
+    Sarif,
+    Yaml,
 }
 
 #[derive(clap::Args)]
@@ -156,8 +171,20 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             targets,
             fail_on,
             json,
+            format,
+            output,
             rules,
-        } => cmd_analyze(&resolve(&targets.paths)?, fail_on.threshold(), json, rules),
+        } => cmd_analyze(
+            &resolve(&targets.paths)?,
+            fail_on.threshold(),
+            format.unwrap_or(if json {
+                OutputFormat::Json
+            } else {
+                OutputFormat::Text
+            }),
+            output,
+            rules,
+        ),
         Command::Diagram(t) => cmd_diagram(&resolve(&t.paths)?),
         Command::Import { from, file, output } => cmd_import(from, file, output),
         Command::Export {
@@ -586,7 +613,8 @@ const RULES_FILE: &str = "rules.yaml";
 fn cmd_analyze(
     files: &[PathBuf],
     fail_on: Severity,
-    json: bool,
+    format: OutputFormat,
+    output: Option<PathBuf>,
     rules: Option<PathBuf>,
 ) -> Result<ExitCode, String> {
     let mut lib = otm_core::ThreatLibrary::bundled();
@@ -605,33 +633,44 @@ fn cmd_analyze(
         lib.rules.extend(custom.rules);
     }
 
+    // Keep each finding's source file + line so SARIF can point at it.
     let mut all: Vec<Finding> = Vec::new();
+    let mut located: Vec<(Finding, String, u32)> = Vec::new();
     for file in files {
-        let otm = otm_core::parse_file(file).map_err(|e| e.to_string())?;
-        all.extend(lib.analyze(&otm));
+        let source =
+            std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+        let otm = otm_core::parse(&source).map_err(|e| e.to_string())?;
+        let uri = file.display().to_string();
+        for f in lib.analyze(&otm) {
+            let line = otm_core::sarif::locate_line(&source, &f.element_id);
+            located.push((f.clone(), uri.clone(), line));
+            all.push(f);
+        }
     }
 
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?
-        );
-    } else if all.is_empty() {
-        println!("No findings.");
-    } else {
-        for f in &all {
-            println!(
-                "[{}] {:?}  {}  ({})\n    {} — {}\n    ↳ {}",
-                sev_label(f.severity),
-                f.stride,
-                f.title,
-                f.element_name,
-                f.rule_id,
-                f.description.trim(),
-                f.mitigation,
-            );
+    let rendered = match format {
+        OutputFormat::Text => text_report(&all),
+        OutputFormat::Json => serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?,
+        OutputFormat::Yaml => otm_core::sarif::findings_yaml(&all),
+        OutputFormat::Sarif => {
+            let items: Vec<otm_core::sarif::Located> = located
+                .iter()
+                .map(|(f, u, l)| otm_core::sarif::Located {
+                    finding: f,
+                    uri: u.clone(),
+                    line: *l,
+                })
+                .collect();
+            otm_core::sarif::to_sarif(&items, &lib.rules)
         }
-        println!("\n{} finding(s).", all.len());
+    };
+
+    match &output {
+        Some(path) => {
+            std::fs::write(path, &rendered).map_err(|e| format!("{}: {e}", path.display()))?;
+            eprintln!("Wrote {} finding(s) to {}.", all.len(), path.display());
+        }
+        None => print!("{rendered}"),
     }
 
     let breached = all.iter().any(|f| f.severity >= fail_on);
@@ -640,6 +679,27 @@ fn cmd_analyze(
     } else {
         ExitCode::SUCCESS
     })
+}
+
+fn text_report(all: &[Finding]) -> String {
+    if all.is_empty() {
+        return "No findings.\n".to_string();
+    }
+    let mut s = String::new();
+    for f in all {
+        s += &format!(
+            "[{}] {:?}  {}  ({})\n    {} — {}\n    ↳ {}\n",
+            sev_label(f.severity),
+            f.stride,
+            f.title,
+            f.element_name,
+            f.rule_id,
+            f.description.trim(),
+            f.mitigation,
+        );
+    }
+    s += &format!("\n{} finding(s).\n", all.len());
+    s
 }
 
 fn cmd_diagram(files: &[PathBuf]) -> Result<ExitCode, String> {

@@ -78,6 +78,8 @@ enum Act {
     NewAsset,
     NewFlow,
     NewMit,
+    ExportSarif,
+    ExportYaml,
 }
 
 pub struct App {
@@ -253,6 +255,43 @@ impl App {
         }
     }
 
+    /// Write the current findings next to the model as SARIF or a YAML list.
+    fn export(&mut self, sarif: bool) {
+        let Some(path) = self.path.clone() else {
+            self.status = "no file to export next to".into();
+            return;
+        };
+        let source = otm_core::to_yaml(&self.otm).unwrap_or_default();
+        let (ext, out) = if sarif {
+            let items: Vec<otm_core::sarif::Located> = self
+                .findings
+                .iter()
+                .map(|f| otm_core::sarif::Located {
+                    finding: f,
+                    uri: path.display().to_string(),
+                    line: otm_core::sarif::locate_line(&source, &f.element_id),
+                })
+                .collect();
+            ("sarif", otm_core::sarif::to_sarif(&items, &self.lib.rules))
+        } else {
+            (
+                "findings.yaml",
+                otm_core::sarif::findings_yaml(&self.findings),
+            )
+        };
+        let dest = path.with_extension(ext);
+        match std::fs::write(&dest, out) {
+            Ok(()) => {
+                self.status = format!(
+                    "exported {} findings → {}",
+                    self.findings.len(),
+                    dest.display()
+                )
+            }
+            Err(e) => self.status = format!("export failed: {e}"),
+        }
+    }
+
     fn sync_buffers(&mut self) {
         match self.sel {
             Some(Sel::Zone(i)) => {
@@ -323,6 +362,8 @@ impl App {
             }
             Act::Undo => self.do_undo(),
             Act::Redo => self.do_redo(),
+            Act::ExportSarif => self.export(true),
+            Act::ExportYaml => self.export(false),
             other => self.commit(other),
         }
     }
@@ -567,7 +608,12 @@ impl App {
                 });
                 self.sel = Some(Sel::Mit(self.otm.mitigations.len() - 1));
             }
-            Act::Select(_) | Act::Reveal(_) | Act::Undo | Act::Redo => {}
+            Act::Select(_)
+            | Act::Reveal(_)
+            | Act::Undo
+            | Act::Redo
+            | Act::ExportSarif
+            | Act::ExportYaml => {}
         }
     }
 
@@ -784,6 +830,22 @@ impl App {
             if high > 0 {
                 ui.label(RichText::new(format!("· {high} high")).color(theme::ORANGE));
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button("Export YAML")
+                    .on_hover_text("Write the findings as a YAML list next to the model")
+                    .clicked()
+                {
+                    acts.push(Act::ExportYaml);
+                }
+                if ui
+                    .small_button("Export SARIF")
+                    .on_hover_text("Write SARIF 2.1.0 (GitHub code scanning) next to the model")
+                    .clicked()
+                {
+                    acts.push(Act::ExportSarif);
+                }
+            });
         });
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])

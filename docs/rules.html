@@ -188,6 +188,24 @@
   string. CI re-validates the catalogue against its schema on every change.</p>
 </section>
 
+<section>
+  <h2>Export the findings</h2>
+  <p>Take the findings with you — as <strong>SARIF 2.1.0</strong> (GitHub code scanning
+  and most SAST tooling ingest it) or a portable YAML/JSON list:</p>
+  <pre class="code">wyrm analyze --format sarif -o wyrm.sarif    # GitHub code scanning
+wyrm analyze --format yaml  -o findings.yaml # portable list
+wyrm analyze --format json                   # to stdout (also: --json)</pre>
+  <p>In the GUI, the findings panel has <strong>Export SARIF</strong> / <strong>Export YAML</strong>
+  buttons that write next to the model. SARIF results carry the rule id, severity
+  (<code>error</code>/<code>warning</code>/<code>note</code> + a <code>security-severity</code>
+  score), STRIDE, and a location pointing at the element in the <code>.otm.yaml</code> — so
+  wyrm findings show up alongside your other scanners in the Security tab.</p>
+  <pre class="code"># CI: upload to GitHub code scanning
+- run: wyrm analyze --format sarif -o wyrm.sarif --fail-on critical
+- uses: github/codeql-action/upload-sarif@v3
+  with: { sarif_file: wyrm.sarif }</pre>
+</section>
+
 </main>
 
 <footer>

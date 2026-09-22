@@ -13,6 +13,7 @@ pub mod migrate;
 pub mod model;
 pub mod render;
 pub mod rules;
+pub mod sarif;
 pub mod validate;
 
 pub use model::Otm;

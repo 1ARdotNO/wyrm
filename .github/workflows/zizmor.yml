@@ -1,0 +1,43 @@
+# Static analysis of our own GitHub Actions with zizmor (supply-chain / CI
+# hardening: credential persistence, cache poisoning, excessive permissions,
+# template injection, unpinned actions). Reports to the Security tab as SARIF —
+# informational and non-blocking, mirroring the trivy/clippy scans.
+name: zizmor
+
+on:
+  push:
+    branches: ["main"]
+    paths: [".github/workflows/**"]
+  pull_request:
+    branches: ["main"]
+    paths: [".github/workflows/**"]
+  schedule:
+    - cron: "27 6 * * 1"
+
+permissions: {}
+
+concurrency:
+  group: zizmor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the SARIF report
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Run zizmor
+        env:
+          # Enables online audits (stale pins, etc.); the token is read-only.
+          GH_TOKEN: ${{ github.token }}
+        run: pipx run zizmor --format sarif .github/workflows/ > zizmor.sarif
+        continue-on-error: true
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor

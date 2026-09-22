@@ -74,7 +74,8 @@
       network calls.</li>
     <li><strong>Automated hardening.</strong> Dependencies and Actions are monitored by
       Renovate; every change is gated by CI (fmt, clippy <code>-D warnings</code>, tests,
-      cargo-deny, CodeQL, Trivy, MegaLinter) before merge.</li>
+      cargo-deny, CodeQL, Trivy, MegaLinter) before merge. Our own workflows are
+      SHA-pinned and statically analysed by <a href="https://docs.zizmor.sh">zizmor</a>.</li>
   </ul>
 </section>
 

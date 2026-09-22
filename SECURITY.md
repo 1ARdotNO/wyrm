@@ -32,7 +32,9 @@ the next tagged release.
   `.otm.yaml` you opened; it touches no other path and runs no network calls.
 - **Automated hardening.** Dependencies and GitHub Actions are monitored by
   Renovate; every change is gated by CI (fmt, clippy `-D warnings`, tests,
-  cargo-deny, CodeQL, Trivy, MegaLinter) before merge.
+  cargo-deny, CodeQL, Trivy, MegaLinter) before merge. Our own workflows are
+  SHA-pinned and statically analysed by [zizmor](https://docs.zizmor.sh)
+  (credential persistence, cache poisoning, permissions).
 
 ## What is not a vulnerability
 

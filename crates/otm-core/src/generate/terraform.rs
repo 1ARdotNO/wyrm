@@ -519,8 +519,34 @@ fn classify(rtype: &str) -> Option<Kind> {
 
 /// Infer a component type for a module call from its name + source path.
 fn module_type(name: &str, source: &str) -> &'static str {
+    let n = name.to_lowercase();
     let s = format!("{name} {source}").to_lowercase();
     let has = |kws: &[&str]| kws.iter().any(|k| s.contains(k));
+
+    // IAM / identity / data-source plumbing is config, not runtime attack surface —
+    // keep it out of the exposure and datastore rule paths (and give the IAM rules
+    // a real `identity` to key on). Checked first so a name like
+    // `secret_sync_ksa_principal` isn't mis-bucketed as a data-store.
+    if n.ends_with("_data") || n.ends_with("-data") || n.ends_with("data") {
+        return "external-entity";
+    }
+    if has(&[
+        "ksa_principal",
+        "ksa-principal",
+        "service_account",
+        "service-account",
+        "workload_identity",
+        "workload-identity",
+        "wif_principal",
+        "custom_role",
+        "custom-role",
+    ]) || n.contains("_iam")
+        || n.contains("iam_")
+        || n.starts_with("iam")
+    {
+        return "identity";
+    }
+
     if has(&[
         "postgres",
         "mysql",
@@ -1138,6 +1164,19 @@ resource "google_compute_backend_service" "web" {
         // Linked to the HTTPS edge (component + flow), not the HTTP or VPN one.
         assert!(iap.applies_to.iter().any(|t| t.contains("https-lb")));
         assert!(!iap.applies_to.iter().any(|t| t.contains("http-lb")));
+    }
+
+    #[test]
+    fn module_type_reclassifies_iam_and_data_plumbing() {
+        // IAM/identity and data-source modules are config, not attack surface.
+        assert_eq!(module_type("secret_sync_ksa_principal", ""), "identity");
+        assert_eq!(module_type("iam_roles", ""), "identity");
+        assert_eq!(module_type("workload_identity_binding", ""), "identity");
+        assert_eq!(module_type("infra_project_data", ""), "external-entity");
+        assert_eq!(module_type("shared_vpc_data", ""), "external-entity");
+        // Real datastores still classify as datastores (not swallowed by the above).
+        assert_eq!(module_type("checkout_spanner_database", ""), "database");
+        assert_eq!(module_type("uapi_redis_instance", ""), "data-store");
     }
 
     #[test]

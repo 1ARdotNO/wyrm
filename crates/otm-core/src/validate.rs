@@ -78,7 +78,8 @@ pub fn validate(otm: &Otm) -> Vec<Diagnostic> {
     check_unique(&mut out, "asset", otm.assets.iter().map(|a| a.id.as_str()));
 
     for c in &otm.components {
-        if let Some(tz) = c.parent.as_ref().and_then(|p| p.trust_zone.as_deref()) {
+        let explicit_zone = c.parent.as_ref().and_then(|p| p.trust_zone.as_deref());
+        if let Some(tz) = explicit_zone {
             if !trustzone_ids.contains(tz) {
                 out.push(
                     Diagnostic::error(
@@ -88,12 +89,14 @@ pub fn validate(otm: &Otm) -> Vec<Diagnostic> {
                     .at(&c.id),
                 );
             }
-        } else if c.parent.is_none() {
+        } else if otm.trust_zone_of(&c.id).is_none() {
+            // No resolvable zone — a missing parent, or a parent.component chain
+            // that never reaches one. Either way every zone-based rule skips it.
             out.push(
                 Diagnostic::warning(
-                    "component.parent.missing",
+                    "component.trustZone.unresolved",
                     format!(
-                        "component '{}' has no parent trust zone; boundary analysis will skip it",
+                        "component '{}' resolves to no trust zone; boundary analysis will skip it",
                         c.id
                     ),
                 )

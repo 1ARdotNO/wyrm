@@ -56,6 +56,31 @@ fn findings_are_sorted_most_severe_first() {
 }
 
 #[test]
+fn component_nested_to_no_zone_warns() {
+    // `child` parents to `orphan`, which itself resolves to no trust zone — the
+    // chain never reaches one, so it silently dodges every zone-based rule.
+    let m = r#"
+otmVersion: 0.2.0
+project: { id: p, name: P }
+components:
+  - { id: orphan, name: Orphan, type: process }
+  - { id: child, name: Child, type: process, parent: { component: orphan } }
+"#;
+    let otm = otm_core::parse(m).unwrap();
+    let diags = otm_core::validate(&otm);
+    let unresolved: Vec<&str> = diags
+        .iter()
+        .filter(|d| d.code == "component.trustZone.unresolved")
+        .filter_map(|d| d.element.as_deref())
+        .collect();
+    assert!(unresolved.contains(&"orphan") && unresolved.contains(&"child"));
+    assert!(
+        otm_core::validate::is_valid(&diags),
+        "unresolved zone is a warning, not an error"
+    );
+}
+
+#[test]
 fn dangling_dataflow_source_is_an_error() {
     let broken = r#"
 otmVersion: 0.2.0

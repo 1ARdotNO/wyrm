@@ -76,7 +76,9 @@ struct Builder {
     has_db: bool,
     /// An IAP-gated backend was found anywhere in the config.
     iap: bool,
-    /// (edge component id, ingress flow id) for HTTPS edges — IAP fronts these.
+    /// A Cloud Armor security policy is attached to a backend anywhere in the config.
+    armor: bool,
+    /// (edge component id, ingress flow id) for HTTPS edges — IAP/WAF front these.
     https_edges: Vec<(String, String)>,
 }
 
@@ -133,6 +135,10 @@ impl Builder {
         // IAP on a backend service = a Google-managed auth wall on the HTTPS path.
         if iap_enabled(rtype, attrs) {
             self.iap = true;
+        }
+        // A backend service with `security_policy` set has Cloud Armor in front.
+        if cloud_armor_attached(rtype, attrs) {
+            self.armor = true;
         }
 
         // Edge controls attach nowhere specific here — record them as mitigations.
@@ -237,6 +243,27 @@ impl Builder {
                 risk_reduction: Some(80),
                 applies_to: targets,
                 addresses: vec!["WYRM-T003".to_string(), "WYRM-T005".to_string()],
+            });
+        }
+
+        // Cloud Armor (attached via a backend's `security_policy`) filters the
+        // HTTPS edges. A WAF downgrades edge exposure, it doesn't wall it off —
+        // so a partial reduction, and only on the exposure rule (T003).
+        if self.armor && !self.https_edges.is_empty() {
+            let mut targets: Vec<String> = Vec::new();
+            for (cid, fid) in &self.https_edges {
+                targets.push(cid.clone());
+                targets.push(fid.clone());
+            }
+            self.mitigations.push(Mitigation {
+                id: "cloud-armor".to_string(),
+                name: "Cloud Armor (WAF on the ingress)".to_string(),
+                description: Some(
+                    "A Cloud Armor security policy filters this HTTPS backend. Confirm the policy enforces (not preview) and has meaningful deny rules.".to_string(),
+                ),
+                risk_reduction: Some(50),
+                applies_to: targets,
+                addresses: vec!["WYRM-T003".to_string()],
             });
         }
 
@@ -438,6 +465,7 @@ fn mitigation_for(rtype: &str) -> Option<&'static str> {
         "aws_wafv2_web_acl" => Some("AWS WAF"),
         "aws_shield_protection" => Some("AWS Shield (DDoS)"),
         "google_compute_security_policy" => Some("Cloud Armor"),
+        "google_compute_region_security_policy" => Some("Cloud Armor (regional)"),
         "azurerm_web_application_firewall_policy" => Some("Azure WAF"),
         "azurerm_network_ddos_protection_plan" => Some("Azure DDoS Protection"),
         "sigsci_site" => Some("Signal Sciences WAF"),
@@ -550,6 +578,15 @@ fn is_cluster(rtype: &str) -> bool {
 /// True when a backend service has IAP switched on (`iap { enabled = true }`).
 /// A bare `iap {}` also counts — its presence signals intent; `enabled = false`
 /// does not. Only backend-service resources carry the gate.
+/// True when a backend service has a Cloud Armor policy attached (`security_policy`
+/// set) — the WAF fronts that HTTPS backend.
+fn cloud_armor_attached(rtype: &str, a: Attrs) -> bool {
+    matches!(
+        rtype,
+        "google_compute_backend_service" | "google_compute_region_backend_service"
+    ) && a.get_str("security_policy").is_some_and(|s| !s.is_empty())
+}
+
 fn iap_enabled(rtype: &str, a: Attrs) -> bool {
     if !matches!(
         rtype,
@@ -887,6 +924,28 @@ resource "google_container_node_pool" "np" {
         // The root LB is internet-facing.
         assert!(otm.dataflows.iter().any(|d| d.source == EXTERNAL));
         assert!(looks_like_tfplan(plan));
+    }
+
+    #[test]
+    fn cloud_armor_attachment_links_waf_to_https_edges() {
+        let tf = r#"
+resource "google_compute_global_forwarding_rule" "https" {
+  port_range = "443"
+  target     = "google_compute_target_https_proxy.main.id"
+}
+resource "google_compute_backend_service" "web" {
+  security_policy = "google_compute_security_policy.armor.id"
+}
+"#;
+        let otm = from_terraform(tf, "cloud").unwrap();
+        let armor = otm
+            .mitigations
+            .iter()
+            .find(|m| m.id == "cloud-armor")
+            .expect("Cloud Armor mitigation emitted");
+        assert_eq!(armor.risk_reduction, Some(50));
+        assert!(armor.addresses.iter().any(|r| r == "WYRM-T003"));
+        assert!(armor.applies_to.iter().any(|t| t.contains("https")));
     }
 
     #[test]

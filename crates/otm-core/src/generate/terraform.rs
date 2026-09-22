@@ -4,8 +4,9 @@
 //! inventory: each notable resource becomes a component (load balancers/APIs/
 //! gateways that are internet-facing get an ingress dataflow; datastores land in
 //! a data tier), and edge controls (WAF/Cloud Armor/DDoS) become mitigations.
-//! Internal service-to-service flows aren't inferable from HCL without resolving
-//! references, so they're left for review. See `docs/DETECTION.md`.
+//! Internal flows are inferred conservatively from HCL reference expressions
+//! (a resource that references a datastore becomes a service→data edge); the
+//! rest is left for review. See `docs/DETECTION.md`.
 
 use super::*;
 use crate::model::{Component, Dataflow, Mitigation, Otm, Parent, Project, TrustZone};
@@ -150,6 +151,9 @@ struct Builder {
     /// Bare resource/module ids that collide across scopes and so must be
     /// path-qualified. Empty on the single-document / single-module path.
     qualify: BTreeSet<String>,
+    /// `(referrer component id, referenced bare key)` from HCL traversal
+    /// expressions — resolved into internal dataflows in [`Builder::build`].
+    refs: Vec<(String, String)>,
 }
 
 impl Builder {
@@ -172,11 +176,17 @@ impl Builder {
     }
 
     fn resource(&mut self, rtype: &str, rname: &str, attrs: Attrs) {
-        let (id, display) = self.scoped(
-            &sanitize_id(&format!("{rtype}-{rname}")),
-            &format!("{rtype}.{rname}"),
-        );
+        let bare = sanitize_id(&format!("{rtype}-{rname}"));
+        let (id, display) = self.scoped(&bare, &format!("{rtype}.{rname}"));
         self.add_resource(rtype, &id, &display, rname, attrs);
+        // Record the other resources this one references, for dataflow inference.
+        if let Attrs::Hcl(body) = attrs {
+            for key in body_refs(body) {
+                if key != bare {
+                    self.refs.push((id.clone(), key));
+                }
+            }
+        }
     }
 
     /// Path-qualify an id/display when its bare id collides across module scopes,
@@ -330,7 +340,48 @@ impl Builder {
         fid
     }
 
+    /// Turn recorded HCL references into internal dataflows. Conservative: only
+    /// edges whose target is a *datastore* (the highest-signal relationship) and
+    /// whose bare id resolves to exactly one component — so the flat inventory
+    /// gains real service→data edges without inventing noise.
+    fn infer_dataflows(&mut self) {
+        let mut seen: BTreeSet<String> = self.dataflows.iter().map(|d| d.id.clone()).collect();
+        let mut out = Vec::new();
+        for (from, to) in &self.refs {
+            if from == to {
+                continue;
+            }
+            let (Some(src), Some(dst)) = (self.components.get(from), self.components.get(to))
+            else {
+                continue;
+            };
+            // A real data edge: a service/compute (not another store) reaching a
+            // datastore. Skip crypto config (KMS keys/rings) — a "uses this key"
+            // reference is not a network dataflow.
+            let crypto = ["kms", "keyring", "key-ring", "crypto-key", "crypto_key"]
+                .iter()
+                .any(|k| dst.id.contains(k) || dst.name.to_lowercase().contains(k));
+            if is_datastore(&src.kind) || !is_datastore(&dst.kind) || crypto {
+                continue;
+            }
+            let id = format!("df-{from}-{to}");
+            if seen.insert(id.clone()) {
+                out.push(Dataflow {
+                    id,
+                    name: format!("{} → {}", src.name, dst.name),
+                    source: from.clone(),
+                    destination: to.clone(),
+                    assets: Vec::new(),
+                    attributes: Default::default(),
+                    tags: Vec::new(),
+                });
+            }
+        }
+        self.dataflows.extend(out);
+    }
+
     fn build(mut self, project_name: &str) -> Otm {
+        self.infer_dataflows();
         let mut components: Vec<Component> = self.components.into_values().collect();
         if self.has_edge {
             components.push(external_actor());
@@ -807,6 +858,60 @@ fn label_str(l: &hcl::BlockLabel) -> &str {
     l.as_str()
 }
 
+/// The bare component key a traversal references: `google_sql_database_instance.main.id`
+/// → `google-sql-database-instance-main`; `module.db.x` → `module-db`. Non-resource
+/// roots (`var`/`local`/`data`/`each`/…) reference nothing in the model.
+fn traversal_ref(t: &hcl::Traversal) -> Option<String> {
+    let Expression::Variable(root) = &t.expr else {
+        return None;
+    };
+    let root = root.as_str();
+    let first = t.operators.iter().find_map(|op| match op {
+        hcl::TraversalOperator::GetAttr(id) => Some(id.as_str()),
+        _ => None,
+    })?;
+    match root {
+        "module" => Some(sanitize_id(&format!("module-{first}"))),
+        "var" | "local" | "each" | "count" | "self" | "data" | "path" | "terraform" => None,
+        r if r.contains('_') => Some(sanitize_id(&format!("{r}-{first}"))),
+        _ => None,
+    }
+}
+
+/// Collect every resource/module a value expression references (bare traversals,
+/// and those nested in arrays, objects, parentheses, or conditionals).
+fn collect_refs(e: &Expression, out: &mut Vec<String>) {
+    match e {
+        Expression::Traversal(t) => {
+            if let Some(k) = traversal_ref(t) {
+                out.push(k);
+            }
+            collect_refs(&t.expr, out);
+        }
+        Expression::Array(a) => a.iter().for_each(|x| collect_refs(x, out)),
+        Expression::Object(o) => o.values().for_each(|v| collect_refs(v, out)),
+        Expression::Parenthesis(p) => collect_refs(p, out),
+        Expression::Conditional(c) => {
+            collect_refs(&c.cond_expr, out);
+            collect_refs(&c.true_expr, out);
+            collect_refs(&c.false_expr, out);
+        }
+        _ => {}
+    }
+}
+
+/// References made anywhere in a resource body, including its nested blocks.
+fn body_refs(body: &Body) -> Vec<String> {
+    let mut out = Vec::new();
+    for s in body.iter() {
+        match s {
+            Structure::Attribute(a) => collect_refs(&a.expr, &mut out),
+            Structure::Block(b) => out.extend(body_refs(b.body())),
+        }
+    }
+    out
+}
+
 fn attr<'a>(body: &'a Body, key: &str) -> Option<&'a Expression> {
     body.iter().find_map(|s| match s {
         Structure::Attribute(a) if a.key.as_str() == key => Some(&a.expr),
@@ -1177,6 +1282,36 @@ resource "google_compute_backend_service" "web" {
         // Real datastores still classify as datastores (not swallowed by the above).
         assert_eq!(module_type("checkout_spanner_database", ""), "database");
         assert_eq!(module_type("uapi_redis_instance", ""), "data-store");
+    }
+
+    #[test]
+    fn references_become_internal_dataflows_to_datastores_only() {
+        let tf = r#"
+resource "google_sql_database_instance" "main" {}
+resource "google_compute_instance" "app" {
+  metadata = { db = google_sql_database_instance.main.connection_name }
+}
+resource "google_kms_crypto_key" "k" {}
+resource "google_compute_instance" "enc" {
+  metadata = { key = google_kms_crypto_key.k.id }
+}
+"#;
+        let otm = from_terraform(tf, "cloud").unwrap();
+        // A compute → database reference becomes an internal dataflow.
+        assert!(
+            otm.dataflows
+                .iter()
+                .any(|d| d.source == "google-compute-instance-app"
+                    && d.destination == "google-sql-database-instance-main"),
+            "compute→database reference should infer a dataflow"
+        );
+        // A crypto-config (KMS) reference is not a data flow.
+        assert!(
+            !otm.dataflows
+                .iter()
+                .any(|d| d.destination.contains("crypto-key")),
+            "a KMS key reference must not become a dataflow"
+        );
     }
 
     #[test]

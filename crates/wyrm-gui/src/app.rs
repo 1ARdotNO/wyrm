@@ -111,7 +111,7 @@ impl App {
             None => (blank(), "no file — pass a path".to_string()),
         };
         let lib = ThreatLibrary::bundled();
-        let findings = lib.analyze(&otm);
+        let findings = analyze_scored(&lib, &otm);
         let file_mtime = path.as_ref().and_then(|p| mtime(p));
         Self {
             path,
@@ -148,7 +148,7 @@ impl App {
             self.otm = o;
             self.sel = keep.and_then(|(s, id)| self.find_sel(s, &id));
             self.file_mtime = Some(cur);
-            self.findings = self.lib.analyze(&self.otm);
+            self.findings = analyze_scored(&self.lib, &self.otm);
             self.sync_buffers();
             self.status = format!("reloaded (external change) · {}", path.display());
         }
@@ -228,7 +228,7 @@ impl App {
     fn after_change(&mut self) {
         self.clamp_selection();
         self.save();
-        self.findings = self.lib.analyze(&self.otm);
+        self.findings = analyze_scored(&self.lib, &self.otm);
         self.sync_buffers();
     }
 
@@ -871,6 +871,17 @@ impl App {
                                     .color(theme::YELLOW)
                                     .small(),
                             );
+                        }
+                        if let Some(r) = &f.risk {
+                            ui.label(
+                                RichText::new(format!("OWASP {:?}", r.level))
+                                    .color(risk_color(r.level))
+                                    .small(),
+                            )
+                            .on_hover_text(format!(
+                                "likelihood {:.1} ({:?}) × impact {:.1} ({:?})",
+                                r.likelihood, r.likelihood_band, r.impact, r.impact_band,
+                            ));
                         }
                     });
                     // Click a finding → jump to its element in the tree.
@@ -1518,6 +1529,14 @@ fn mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
 }
 
+/// Run the rules and annotate each finding with its OWASP likelihood/impact score.
+/// The GUI uses seeded defaults; org-level `.threatmodel/risk.yaml` tuning is a CLI concern.
+fn analyze_scored(lib: &ThreatLibrary, otm: &Otm) -> Vec<Finding> {
+    let mut findings = lib.analyze(otm);
+    otm_core::risk::annotate(&mut findings, otm, &Default::default());
+    findings
+}
+
 fn chips(ui: &mut Ui, items: &[String], color: Color32, mut on_del: impl FnMut(String)) {
     ui.horizontal_wrapped(|ui| {
         if items.is_empty() {
@@ -1590,6 +1609,17 @@ fn sev_color(s: Severity) -> Color32 {
         Severity::High => theme::ORANGE,
         Severity::Medium => theme::YELLOW,
         Severity::Low => theme::MUTED,
+    }
+}
+
+fn risk_color(l: otm_core::risk::RiskLevel) -> Color32 {
+    use otm_core::risk::RiskLevel as R;
+    match l {
+        R::Critical => theme::RED,
+        R::High => theme::ORANGE,
+        R::Medium => theme::YELLOW,
+        R::Low => theme::GREEN,
+        R::Note => theme::MUTED,
     }
 }
 

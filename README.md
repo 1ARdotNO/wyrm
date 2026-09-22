@@ -18,7 +18,12 @@ infrastructure**.
 - **OTM engine** — parse/validate OTM (YAML or JSON), a data-driven STRIDE rule
   engine, and Mermaid diagram generation. One Rust core, shared everywhere.
 - **CLI** — `wyrm init | validate | analyze | diagram`. `analyze` exits non-zero on
-  HIGH+ findings, so it drops straight into CI.
+  HIGH+ findings, so it drops straight into CI, and exports **SARIF 2.1.0**/YAML for
+  GitHub code scanning.
+- **OWASP Risk Rating** — every finding is scored `Likelihood × Impact` (the 16 OWASP
+  factors), seeded from the model's asset CIA, trust-zone exposure, and logging, then
+  tuned by `.threatmodel/risk.yaml` and per-element `risk.*` attributes.
+  [Risk rating →](https://1ardotno.github.io/wyrm/risk.html)
 - **Auto-detection** — `wyrm init` builds a baseline model from **docker-compose**
   or **Kubernetes/Istio** manifests, and **reconciles** on re-run (regenerates the
   topology without clobbering your mitigations). [Detection matrix →](docs/DETECTION.md)

@@ -123,6 +123,9 @@ pub struct Finding {
     /// The pre-mitigation severity, present only when a control downgraded it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_severity: Option<Severity>,
+    /// OWASP Risk Rating (likelihood × impact), attached by [`crate::risk::annotate`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<crate::risk::Risk>,
 }
 
 /// The default catalogue, embedded at build time so the CLI and WASM builds are
@@ -249,6 +252,7 @@ fn finding_for(rule: &Rule, element_id: &str, element_name: &str) -> Finding {
         mitigation: rule.mitigation.clone(),
         mitigated_by: Vec::new(),
         base_severity: None,
+        risk: None,
     }
 }
 

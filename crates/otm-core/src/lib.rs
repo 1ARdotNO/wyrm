@@ -12,6 +12,7 @@ pub mod generate;
 pub mod migrate;
 pub mod model;
 pub mod render;
+pub mod risk;
 pub mod rules;
 pub mod sarif;
 pub mod validate;

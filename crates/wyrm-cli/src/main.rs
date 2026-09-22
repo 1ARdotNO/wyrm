@@ -633,6 +633,17 @@ fn cmd_analyze(
         lib.rules.extend(custom.rules);
     }
 
+    // OWASP Risk Rating config: org defaults from .threatmodel/risk.yaml, if any.
+    let risk_cfg = {
+        let p = PathBuf::from(DEFAULT_DIR).join("risk.yaml");
+        if p.is_file() {
+            let t = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+            otm_core::risk::config_from_yaml(&t).map_err(|e| format!("{}: {e}", p.display()))?
+        } else {
+            otm_core::risk::RiskConfig::default()
+        }
+    };
+
     // Keep each finding's source file + line so SARIF can point at it.
     let mut all: Vec<Finding> = Vec::new();
     let mut located: Vec<(Finding, String, u32)> = Vec::new();
@@ -641,7 +652,9 @@ fn cmd_analyze(
             std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
         let otm = otm_core::parse(&source).map_err(|e| e.to_string())?;
         let uri = file.display().to_string();
-        for f in lib.analyze(&otm) {
+        let mut fs = lib.analyze(&otm);
+        otm_core::risk::annotate(&mut fs, &otm, &risk_cfg);
+        for f in fs {
             let line = otm_core::sarif::locate_line(&source, &f.element_id);
             located.push((f.clone(), uri.clone(), line));
             all.push(f);
@@ -697,6 +710,12 @@ fn text_report(all: &[Finding]) -> String {
             f.description.trim(),
             f.mitigation,
         );
+        if let Some(r) = &f.risk {
+            s += &format!(
+                "    risk: {:?} (likelihood {:.1} {:?} × impact {:.1} {:?})\n",
+                r.level, r.likelihood, r.likelihood_band, r.impact, r.impact_band,
+            );
+        }
     }
     s += &format!("\n{} finding(s).\n", all.len());
     s

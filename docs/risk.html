@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wyrm — OWASP Risk Rating</title>
+<meta name="description" content="How wyrm layers the OWASP Risk Rating Methodology over its STRIDE findings: 16 likelihood/impact factors seeded from the model graph, tuned by .threatmodel/risk.yaml and per-element risk.* attributes." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap navwrap">
+    <a class="brand" href="index.html">🐉 wyrm</a>
+    <span class="navlinks">
+      <a href="index.html">Home</a>
+      <a href="model.html">Model</a>
+      <a href="rules.html">Rules</a>
+      <a href="risk.html" class="active">Risk</a>
+      <a href="detect.html">Auto-detection</a>
+      <a href="editors.html">Editors</a>
+      <a href="ai.html">AI</a>
+      <a href="index.html#ci">CI</a>
+      <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header class="subhero">
+  <div class="wrap">
+    <h1>Risk rating</h1>
+    <p class="lede">
+      A <a href="rules.html">rule</a> tells you a threat <em>class</em> applies and gives it a
+      fixed severity. The <a href="https://owasp.org/www-community/OWASP_Risk_Rating_Methodology">OWASP
+      Risk Rating Methodology</a> asks the next question — <em>how likely, and how bad here?</em>
+      wyrm scores every finding <code>Risk = Likelihood × Impact</code>, seeding the factors from
+      what the <a href="model.html">model</a> already knows so you get a defensible number without
+      filling in a spreadsheet.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section>
+  <h2>How the score is built</h2>
+  <p>Each finding carries a <code>risk</code> block. Likelihood and impact are each the mean of
+  their factors on OWASP's <strong>0–9</strong> scale, banded
+  <strong>Low</strong> (&lt;3) · <strong>Medium</strong> (&lt;6) · <strong>High</strong> (≥6),
+  then combined through the OWASP matrix into an overall level:</p>
+  <table class="cmp">
+    <thead><tr><th>Likelihood ↓ / Impact →</th><th>Low</th><th>Medium</th><th>High</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Low</strong></td><td>Note</td><td>Low</td><td>Medium</td></tr>
+      <tr><td><strong>Medium</strong></td><td>Low</td><td>Medium</td><td>High</td></tr>
+      <tr><td><strong>High</strong></td><td>Medium</td><td>High</td><td>Critical</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Impact</strong> is the higher of a <em>technical</em> impact (driven by the CIA of the
+  assets at stake — always present) and a <em>business</em> impact (financial, reputation,
+  compliance, privacy — configured by the org). Business impact escalates a finding but never
+  dilutes the technical floor.</p>
+</section>
+
+<section>
+  <h2>The 16 factors, and where wyrm seeds them</h2>
+  <p>Everything below is a starting point derived from the graph. It is meant to be overridden —
+  see <a href="#tuning">tuning</a>.</p>
+
+  <h3>Threat-agent — <em>who</em> would attack, and can they</h3>
+  <table class="cmp">
+    <thead><tr><th>Factor</th><th>Seeded from</th></tr></thead>
+    <tbody>
+      <tr><td><code>skill</code></td><td>5 (advanced computer user) — org knowledge; override per model.</td></tr>
+      <tr><td><code>motive</code></td><td>5 (possible reward) — org knowledge; override per model.</td></tr>
+      <tr><td><code>opportunity</code></td><td>Trust-zone exposure: 8 when the element sits in / touches a low-trust (≤30) zone, else 4.</td></tr>
+      <tr><td><code>size</code></td><td>Exposure: 9 (anonymous internet) when exposed, else 5 (internal users).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Vulnerability — <em>how</em> exploitable it is</h3>
+  <table class="cmp">
+    <thead><tr><th>Factor</th><th>Seeded from</th></tr></thead>
+    <tbody>
+      <tr><td><code>easeOfDiscovery</code></td><td>Exposure: 8 when exposed, else 4.</td></tr>
+      <tr><td><code>easeOfExploit</code></td><td>Exposure: 6 when exposed, else 3.</td></tr>
+      <tr><td><code>awareness</code></td><td>7 — wyrm rules are well-known, published threat classes.</td></tr>
+      <tr><td><code>intrusionDetection</code></td><td>Logging control: 3 when the element is logged/audited, else 8 (OWASP scale: higher = <em>less</em> detected).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Technical impact — <em>what breaks</em> if it happens</h3>
+  <table class="cmp">
+    <thead><tr><th>Factor</th><th>Seeded from</th></tr></thead>
+    <tbody>
+      <tr><td><code>lossOfConfidentiality</code></td><td>Max <code>confidentiality</code> of the assets the element touches, scaled 0–100 → 0–9.</td></tr>
+      <tr><td><code>lossOfIntegrity</code></td><td>Max asset <code>integrity</code>, scaled.</td></tr>
+      <tr><td><code>lossOfAvailability</code></td><td>Max asset <code>availability</code>, scaled.</td></tr>
+      <tr><td><code>lossOfAccountability</code></td><td>Logging control: 2 when logged, else 7.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Business impact — <em>what it costs the org</em></h3>
+  <table class="cmp">
+    <thead><tr><th>Factor</th><th>Seeded from</th></tr></thead>
+    <tbody>
+      <tr><td><code>financialDamage</code></td><td>3 unless the org configures it.</td></tr>
+      <tr><td><code>reputationDamage</code></td><td>3 unless the org configures it.</td></tr>
+      <tr><td><code>nonCompliance</code></td><td>3 unless the org configures it.</td></tr>
+      <tr><td><code>privacyViolation</code></td><td>7 when the data at stake is highly confidential (≥70), else 3.</td></tr>
+    </tbody>
+  </table>
+  <p class="when">Exposure = the lowest trust rating the element sits in (a component's
+  <a href="model.html">zone</a>) or touches (the min of a dataflow's two endpoints). Logging is
+  read from an element's <code>logging</code>/<code>audit</code>/<code>flow-log</code> attributes,
+  tags, or a linked logging mitigation.</p>
+</section>
+
+<section id="tuning">
+  <h2>Tuning — three layers, last wins</h2>
+  <ol class="principles">
+    <li><strong>Model seed</strong> — the factors above, straight from the graph.</li>
+    <li><strong>Org config</strong> — <code>.threatmodel/risk.yaml</code> sets the factors the graph
+      can't infer (attacker profile, business impact), applied to every finding.</li>
+    <li><strong>Per-element attributes</strong> — <code>risk.&lt;factor&gt;</code> on a component or
+      dataflow overrides just that element (0–9, clamped).</li>
+  </ol>
+
+  <h3><code>.threatmodel/risk.yaml</code></h3>
+  <p>Org-wide defaults. Every key is optional; anything unset keeps its model-derived seed.</p>
+  <pre class="code"># Threat-agent profile for your context
+skill: 6            # e.g. targeted by capable, funded actors
+motive: 7
+size: 9             # your surface is internet-facing by default
+
+# Business impact — what a breach costs *this* org
+financialDamage: 7
+reputationDamage: 8
+nonCompliance: 6    # regulated (PCI, GDPR, …)
+privacyViolation: 8</pre>
+
+  <h3>Per-element overrides</h3>
+  <p>Any of the 16 factors, as a <code>risk.&lt;factor&gt;</code> attribute (camelCase names), on
+  the element it applies to:</p>
+  <pre class="code">components:
+  - id: payments-api
+    name: Payments API
+    type: web-service
+    parent: { trustZone: edge }
+    assets: { processed: [card-data] }
+    attributes:
+      risk.easeOfExploit: "2"   # hardened, pentested endpoint
+      risk.financialDamage: "9" # money moves through here</pre>
+</section>
+
+<section>
+  <h2>Reading the score</h2>
+  <p><code>wyrm analyze</code> prints the rating under each finding; the
+  <a href="editors.html">GUI</a> findings panel shows an <code>OWASP</code> badge (hover for the
+  likelihood × impact breakdown); and <a href="rules.html#export">SARIF</a> export carries the full
+  block as an <code>owaspRisk</code> property so it survives into GitHub code scanning and
+  downstream tooling.</p>
+  <pre class="code">HIGH  Information Disclosure · Payments API · WYRM-T008
+      ↳ Require authn/authz in front of this endpoint.
+    risk: Critical (likelihood 7.0 High × impact 7.3 High)</pre>
+  <p>The rule's severity says <em>this class of threat is serious</em>; the OWASP level says
+  <em>and in this position, with this data, it's a Critical you should fix first</em>. Sort by the
+  risk level to triage.</p>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · <a href="security.html">Security</a> · MIT
+  </div>
+</footer>
+</body>
+</html>

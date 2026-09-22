@@ -52,6 +52,7 @@ pub fn to_sarif(items: &[Located], rules: &[Rule]) -> String {
                     "element": f.element_name,
                     "stride": stride(f.stride),
                     "severity": sev(f.severity),
+                    "owaspRisk": serde_json::to_value(f.risk.as_ref()).unwrap_or(Value::Null),
                 },
             })
         })
@@ -152,12 +153,11 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&sarif).unwrap();
         assert_eq!(v["version"], "2.1.0");
         assert!(
-            v["runs"][0]["tool"]["driver"]["rules"]
+            !v["runs"][0]["tool"]["driver"]["rules"]
                 .as_array()
                 .unwrap()
-                .len()
-                >= 1
+                .is_empty()
         );
-        assert!(v["runs"][0]["results"].as_array().unwrap().len() >= 1);
+        assert!(!v["runs"][0]["results"].as_array().unwrap().is_empty());
     }
 }

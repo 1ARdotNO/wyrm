@@ -681,8 +681,9 @@ impl App {
                     },
                 );
                 self.tree_section(ui, acts, "comps", "COMPONENTS", Act::NewComp, |ui, acts| {
-                    // Group by the `module` attribute (plan-JSON tags these) so big
-                    // repos collapse into per-module folders; ungrouped show flat.
+                    // Collapse big repos into folders: by `module` (plan-JSON) when
+                    // present, else by `environment`, else by `scope` (raw-HCL) —
+                    // otherwise a 400-component model shows as one flat wall.
                     let mut ungrouped: Vec<usize> = Vec::new();
                     let mut groups: std::collections::BTreeMap<&str, Vec<usize>> =
                         std::collections::BTreeMap::new();
@@ -690,7 +691,12 @@ impl App {
                         if !(passes(&c.name, &filter) || passes(&c.kind, &filter)) {
                             continue;
                         }
-                        match c.attributes.get("module") {
+                        let key = c
+                            .attributes
+                            .get("module")
+                            .or_else(|| c.attributes.get("environment"))
+                            .or_else(|| c.attributes.get("scope"));
+                        match key {
                             Some(m) => groups.entry(m.as_str()).or_default().push(i),
                             None => ungrouped.push(i),
                         }

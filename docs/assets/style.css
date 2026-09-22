@@ -106,6 +106,15 @@ table.cmp { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 
 .brand { font-weight: 700; color: var(--ink); }
 .navlinks a { color: var(--dim); margin-left: 18px; font-size: 14px; }
 .navlinks a.active, .navlinks a:hover { color: var(--accent); }
+.hamburger { display: none; }
+.nav-toggle { display: none; }
+@media (max-width: 760px) {
+  .navwrap { flex-wrap: wrap; height: auto; padding-top: 6px; padding-bottom: 6px; }
+  .hamburger { display: inline-block; cursor: pointer; font-size: 22px; line-height: 1; color: var(--ink); user-select: none; padding: 6px 8px; }
+  .navlinks { display: none; width: 100%; flex-direction: column; }
+  .navlinks a { margin: 8px 0 0 0; font-size: 15px; }
+  .nav-toggle:checked ~ .navlinks { display: flex; }
+}
 .subhero { border-bottom: 1px solid var(--line); padding: 40px 0 26px; background: radial-gradient(900px 300px at 30% -20%, #1b2740 0%, var(--bg) 70%); }
 .subhero h1 { font-size: 34px; margin: 0 0 10px; }
 

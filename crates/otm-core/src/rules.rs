@@ -264,10 +264,10 @@ fn eval_component(p: &Predicate, c: &Component, otm: &Otm) -> bool {
             .assets
             .all()
             .any(|id| asset_confidentiality(otm, id) >= *min_confidentiality),
-        Predicate::LowTrustZone { max_trust } => c
-            .parent
-            .as_ref()
-            .and_then(|p| p.trust_zone.as_deref())
+        // Resolve via trust_zone_of so components nested under a module/cluster
+        // component (parent.component) inherit their container's zone.
+        Predicate::LowTrustZone { max_trust } => otm
+            .trust_zone_of(&c.id)
             .and_then(|tz| trust_rating(otm, tz))
             .is_some_and(|rating| rating <= *max_trust),
         Predicate::HasTag { tag } => match tag.split_once('=') {

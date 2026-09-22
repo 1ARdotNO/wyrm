@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wyrm — security & responsible disclosure</title>
+<meta name="description" content="How to report a vulnerability in wyrm privately, what's in scope, supported versions, and our handling notes." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap navwrap">
+    <a class="brand" href="index.html">🐉 wyrm</a>
+    <span class="navlinks">
+      <a href="index.html">Home</a>
+      <a href="model.html">Model</a>
+      <a href="rules.html">Rules</a>
+      <a href="detect.html">Auto-detection</a>
+      <a href="editors.html">Editors</a>
+      <a href="ai.html">AI</a>
+      <a href="index.html#ci">CI</a>
+      <a href="https://github.com/1ARdotNO/wyrm">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header class="subhero">
+  <div class="wrap">
+    <h1>Security &amp; responsible disclosure</h1>
+    <p class="lede">
+      Found something exploitable in wyrm? Report it privately and we'll work a fix
+      and a coordinated disclosure with you. Please don't open a public issue for
+      anything exploitable.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section>
+  <h2>Report a vulnerability</h2>
+  <ul class="principles">
+    <li><strong>Preferred:</strong> GitHub's
+      <a href="https://github.com/1ARdotNO/wyrm/security/advisories/new">Report a vulnerability</a>
+      (Security → Advisories) — private vulnerability reporting is enabled on the repo.</li>
+    <li>We aim to <strong>acknowledge within a few days</strong> and to coordinate a fix and
+      disclosure timeline with you.</li>
+  </ul>
+  <p>Include the affected version/commit, a description, reproduction steps, and impact.
+  Proof-of-concept code is welcome — but never test against systems or data you don't own.</p>
+</section>
+
+<section>
+  <h2>Supported versions</h2>
+  <p>wyrm is pre-1.0; only the latest <code>main</code> is supported. Fixes land on
+  <code>main</code> and in the next tagged release.</p>
+</section>
+
+<section>
+  <h2>Scope &amp; handling notes</h2>
+  <ul class="principles">
+    <li><strong>Untrusted models.</strong> wyrm parses OTM documents (YAML/JSON) that may
+      come from other repos or contributors. Parsing is memory-safe Rust with no code
+      execution — a malformed model should fail to parse, never escape the parser.</li>
+    <li><strong>Importers invoke external tools.</strong> <code>wyrm init</code> shells out to
+      <code>helm</code>, <code>kustomize</code>/<code>kubectl</code>, and reads Terraform/plan
+      sources you point it at. Those tools run their own templating — only run
+      <code>wyrm init</code> on infrastructure sources you trust, as you would
+      <code>helm template</code> or <code>terraform plan</code>.</li>
+    <li><strong>The GUI live-writes the file.</strong> <code>wyrm-gui</code> saves every edit
+      back to the <code>.otm.yaml</code> you opened; it touches no other path and makes no
+      network calls.</li>
+    <li><strong>Automated hardening.</strong> Dependencies and Actions are monitored by
+      Renovate; every change is gated by CI (fmt, clippy <code>-D warnings</code>, tests,
+      cargo-deny, CodeQL, Trivy, MegaLinter) before merge.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>What is <em>not</em> a vulnerability</h2>
+  <ul class="principles">
+    <li>A "missing" threat finding — the rule library is best-effort and intentionally
+      <a href="rules.html">extensible</a>, not a guarantee of completeness. Propose a rule instead.</li>
+    <li>Findings that require an already-compromised host or working tree.</li>
+  </ul>
+  <p class="note">The full policy also lives in
+  <a href="https://github.com/1ARdotNO/wyrm/blob/main/SECURITY.md">SECURITY.md</a> at the repo root.</p>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🐉 wyrm</span> · <a href="https://github.com/1ARdotNO/wyrm">github.com/1ARdotNO/wyrm</a> · MIT
+  </div>
+</footer>
+</body>
+</html>

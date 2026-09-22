@@ -24,6 +24,12 @@ the next tagged release.
 - **Untrusted models.** wyrm parses OTM documents (YAML/JSON) that may come from
   other repos or contributors. Parsing is memory-safe Rust with no code
   execution; a malformed model should fail to parse, never escape the parser.
+- **Importers invoke external tools.** `wyrm init` shells out to `helm`,
+  `kustomize`/`kubectl`, and reads Terraform/plan sources you point it at. Those
+  tools run their own templating — only run `wyrm init` on infrastructure sources
+  you trust, as you would `helm template` or `terraform plan` on them.
+- **The GUI live-writes the file.** `wyrm-gui` saves every edit back to the
+  `.otm.yaml` you opened; it touches no other path and runs no network calls.
 - **Automated hardening.** Dependencies and GitHub Actions are monitored by
   Renovate; every change is gated by CI (fmt, clippy `-D warnings`, tests,
   cargo-deny, CodeQL, Trivy, MegaLinter) before merge.

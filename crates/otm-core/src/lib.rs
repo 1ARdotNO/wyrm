@@ -8,6 +8,7 @@
 
 pub mod canvas;
 pub mod enrich;
+pub mod environ;
 pub mod generate;
 pub mod migrate;
 pub mod model;

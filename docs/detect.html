@@ -64,6 +64,28 @@ wyrm analyze                        # then find the threats in the baseline</pre
   </div>
 
   <div class="panel" style="padding:16px;margin:14px 0">
+    <h3 style="margin-top:0">🌐 Environments: slice the model by prod / staging / …</h3>
+    <p>wyrm stamps an <code>environment</code> attribute on each component so a model spanning many
+    envs can be filtered and risk-weighted per env — statically, with no plan. Three signals, in order:</p>
+    <ul class="principles">
+      <li><strong>Path</strong> (default) — a directory whose next segment names the env
+        (<code>environments/prod/…</code> → <code>prod</code>). Markers default to
+        <code>environments</code>/<code>envs</code>/<code>env</code>.</li>
+      <li><strong>Scope map</strong> — for repos where the env is a <em>variable</em>, not a folder,
+        assert <code>dir-prefix → env</code> yourself (longest prefix wins).</li>
+      <li><strong>Literal label</strong> — a resource <code>labels</code>/<code>tags</code> value
+        (interpolated <code>var.environment</code> values are skipped, not guessed).</li>
+    </ul>
+    <p>Tune it in <code>.threatmodel/environments.yaml</code>:</p>
+    <pre class="code">pathMarkers: [environments, envs, env]   # dir segment before the env name
+scopes:                                   # for var-based layouts
+  uapi: prod
+  infra/core: shared</pre>
+    <p>Where one root module deploys to many envs via a <code>var.environment</code>, no static signal
+    can name a single env — those components stay unclassified rather than mislabelled.</p>
+  </div>
+
+  <div class="panel" style="padding:16px;margin:14px 0">
     <h3 style="margin-top:0">🧩 Terraform modules: point wyrm at a plan for full resolution</h3>
     <p>Reading <code>.tf</code> directly, wyrm sees resources inside <em>local</em> modules but can't
     expand <code>count</code>/<code>for_each</code> or reach registry/git modules — the same blind

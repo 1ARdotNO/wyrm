@@ -168,6 +168,7 @@ impl Builder {
             kind,
             if store { TZ_DATA } else { TZ_INTERNAL },
         );
+        self.tag_provenance(&id, None);
     }
 
     fn resource(&mut self, rtype: &str, rname: &str, attrs: Attrs) {
@@ -263,6 +264,23 @@ impl Builder {
                 }
             }
             None => {}
+        }
+        self.tag_provenance(id, Some(attrs));
+    }
+
+    /// Record where a component came from — its module `scope` (directory) and a
+    /// literal `environment` label if the resource carries one — so downstream
+    /// env classification can slice the model without a plan.
+    fn tag_provenance(&mut self, id: &str, attrs: Option<Attrs>) {
+        let scope = self.scope.clone();
+        let Some(c) = self.components.get_mut(id) else {
+            return;
+        };
+        if !scope.is_empty() {
+            c.attributes.entry("scope".to_string()).or_insert(scope);
+        }
+        if let Some(env) = attrs.and_then(literal_env) {
+            c.attributes.entry("environment".to_string()).or_insert(env);
         }
     }
 
@@ -567,6 +585,25 @@ fn mitigation_for(rtype: &str) -> Option<&'static str> {
 }
 
 /// Provider defaults favour exposure — treat "attribute absent" as internet-facing.
+/// A literal environment name from a resource's `labels`/`tags`, if present.
+/// Interpolated/variable values (`var.environment`, `${…}`) aren't statically
+/// knowable, so they're skipped — the env stays unclassified rather than guessed.
+fn literal_env(a: Attrs) -> Option<String> {
+    for (block, key) in [
+        ("labels", "environment"),
+        ("labels", "env"),
+        ("tags", "Environment"),
+        ("tags", "environment"),
+    ] {
+        if let Some(v) = a.nested(block).and_then(|n| n.get_str(key)) {
+            if !v.is_empty() && !v.contains("var.") && !v.contains("${") {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn is_internet_facing(rtype: &str, a: Attrs) -> bool {
     match rtype {
         "aws_lb" | "aws_alb" | "aws_elb" => a.get_bool("internal") != Some(true),

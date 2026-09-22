@@ -319,6 +319,19 @@ fn cmd_init(
     let text = read_source(&source)?;
     let mut otm = build_model(&source, &text, &project)?;
 
+    // Classify components into a deployment environment (folder convention, an
+    // explicit scope→env map, or a literal label). `.threatmodel/environments.yaml`
+    // tunes it; its absence uses the common `environments/<env>` layout.
+    let env_cfg = {
+        let p = PathBuf::from(DEFAULT_DIR).join("environments.yaml");
+        match std::fs::read_to_string(&p) {
+            Ok(doc) => otm_core::environ::config_from_yaml(&doc)
+                .map_err(|e| format!("{}: {e}", p.display()))?,
+            Err(_) => Default::default(),
+        }
+    };
+    otm_core::environ::classify_environments(&mut otm, &env_cfg);
+
     // Strip excluded noise from the generated topology (before merge, so any IAM
     // the reviewer hand-annotates is never removed).
     if !exclude.is_empty() {

@@ -1384,7 +1384,9 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    // egui 0.36: the app renders into the root `Ui`; panels nest via `show_inside`.
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         // Poll the file for external edits (editor / AI / CLI) and keep repainting
         // so we notice them even while idle.
         self.poll_external();
@@ -1405,16 +1407,16 @@ impl eframe::App for App {
             }
         });
 
-        egui::TopBottomPanel::top("bar").show(ctx, |ui| self.top_bar(ui, &mut acts));
-        egui::SidePanel::left("tree")
+        egui::Panel::top("bar").show(ui, |ui| self.top_bar(ui, &mut acts));
+        egui::Panel::left("tree")
             .resizable(true)
-            .default_width(270.0)
-            .show(ctx, |ui| self.left_panel(ui, &mut acts));
-        egui::TopBottomPanel::bottom("findings")
+            .default_size(270.0)
+            .show(ui, |ui| self.left_panel(ui, &mut acts));
+        egui::Panel::bottom("findings")
             .resizable(true)
-            .default_height(180.0)
-            .show(ctx, |ui| self.findings_panel(ui, &mut acts));
-        egui::CentralPanel::default().show(ctx, |ui| match self.view {
+            .default_size(180.0)
+            .show(ui, |ui| self.findings_panel(ui, &mut acts));
+        egui::CentralPanel::default().show(ui, |ui| match self.view {
             View::Inspector => self.inspector(ui, &mut acts),
             View::Graph => self.graph_view(ui, &mut acts),
         });

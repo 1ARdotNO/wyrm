@@ -10,8 +10,5 @@ description = "Native GUI editor for wyrm OTM threat models"
 
 [dependencies]
 otm-core = { path = "../otm-core" }
-# Held at 0.32 — egui 0.36 is a major API break (App::ui not update, panels moved,
-# Context::style removed) and needs Rust 1.95. Renovate is capped <0.33 until the
-# 0.36 migration (see task). 0.32.x builds on our toolchain.
-eframe = "0.32.3"
-egui = "0.32.3"
+eframe = "0.36.2"
+egui = "0.36.2"

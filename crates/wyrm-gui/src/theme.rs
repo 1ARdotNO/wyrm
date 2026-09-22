@@ -44,9 +44,10 @@ pub fn apply(ctx: &Context) {
     v.widgets.active.bg_fill = Color32::from_rgb(0x45, 0x4c, 0x59);
     ctx.set_visuals(v);
 
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(9.0, 4.0);
-    style.spacing.window_margin = egui::Margin::same(10);
-    ctx.set_style(style);
+    // egui 0.36 replaced Context::style/set_style with per-theme style mutation.
+    ctx.all_styles_mut(|style| {
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(9.0, 4.0);
+        style.spacing.window_margin = egui::Margin::same(10);
+    });
 }

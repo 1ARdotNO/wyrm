@@ -71,10 +71,11 @@ Verdicts are keep/revise/drop across the 5 adversarial reviewers.
 
 ## High-value rules the QA said the set still MISSES
 
-- **Residual-risk rule** — a high/critical finding (T001–T003) with **no linked
-  mitigation** covering it. "The highest-value thing a threat-model-as-code tool
-  can do that a scanner can't — surface *unmitigated* risk." (needs a post-pass
-  over findings × mitigations.)
+- **Residual-risk rule** — ✅ *shipped.* Any high/critical finding with **no linked
+  mitigation** covering it is flagged `residual` (`Finding::is_residual`) in the CLI
+  report, GUI badge, and SARIF `residual` property, and counted in the summary. "The
+  highest-value thing a threat-model-as-code tool can do that a scanner can't — surface
+  *unmitigated* risk." A weak, non-downgrading mitigation still clears the flag.
 - **Repudiation (R)** is entirely absent, before and after — `lacksControl{logging}`
   on a sensitive/cross-boundary flow fills it with the same new primitive.
 - **Egress / exfiltration** — a high-trust datastore with an outbound flow to a

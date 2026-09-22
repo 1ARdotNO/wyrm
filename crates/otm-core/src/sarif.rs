@@ -52,6 +52,7 @@ pub fn to_sarif(items: &[Located], rules: &[Rule]) -> String {
                     "element": f.element_name,
                     "stride": stride(f.stride),
                     "severity": sev(f.severity),
+                    "residual": f.is_residual(),
                     "owaspRisk": serde_json::to_value(f.risk.as_ref()).unwrap_or(Value::Null),
                 },
             })

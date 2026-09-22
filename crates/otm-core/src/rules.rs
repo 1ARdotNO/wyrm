@@ -128,6 +128,16 @@ pub struct Finding {
     pub risk: Option<crate::risk::Risk>,
 }
 
+impl Finding {
+    /// Residual risk: a serious threat the model records *no* mitigation for —
+    /// the unmitigated-by-design signal a scanner can't give. High/critical only,
+    /// and only when no linked mitigation touched it (a downgraded finding isn't
+    /// residual — an attempt is on record).
+    pub fn is_residual(&self) -> bool {
+        self.mitigated_by.is_empty() && matches!(self.severity, Severity::High | Severity::Critical)
+    }
+}
+
 /// The default catalogue, embedded at build time so the CLI and WASM builds are
 /// self-contained. Override with [`ThreatLibrary::from_yaml`].
 const DEFAULT_LIBRARY: &str = include_str!("../threats/library.yaml");
@@ -587,6 +597,22 @@ mod tests {
         assert_eq!(f.severity, Severity::Medium);
         assert_eq!(f.base_severity, Some(Severity::High));
         assert_eq!(f.mitigated_by, vec!["waf".to_string()]);
+    }
+
+    #[test]
+    fn residual_flags_serious_findings_with_no_mitigation() {
+        let otm = exposed_model();
+        let f = &ThreatLibrary::bundled().analyze(&otm)[0];
+        assert_eq!(f.severity, Severity::High);
+        assert!(f.is_residual(), "an unmitigated high finding is residual");
+
+        // A weak mitigation (no downgrade) still records an attempt → not residual.
+        let mut m = exposed_model();
+        m.mitigations.push(mitigation(Some(30)));
+        let f = &ThreatLibrary::bundled().analyze(&m)[0];
+        assert_eq!(f.severity, Severity::High, "too weak to downgrade");
+        assert!(!f.mitigated_by.is_empty());
+        assert!(!f.is_residual(), "a mitigation on record clears residual");
     }
 
     #[test]

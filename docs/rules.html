@@ -176,6 +176,12 @@
   <p><code>addresses</code> scopes a mitigation to specific rule ids, so — for example — a WAF
   can down-rank an edge-exposure finding (T003) without muting an encryption finding (T002)
   on the same element. A downgraded finding shows its original severity, so nothing is hidden.</p>
+  <p><strong>Residual risk.</strong> The inverse is the signal a scanner can't give: a
+  high/critical finding with <em>no</em> mitigation on record at all. wyrm flags these as
+  <code>residual</code> — in the report line, the <a href="editors.html">GUI</a> badge, and a
+  <code>residual</code> property on the <a href="#export">SARIF</a> result — and counts them in
+  the summary. A weak mitigation that's too small to downgrade still clears the flag: an attempt
+  is on record. Residual findings are where a threat model earns its keep — sort them to the top.</p>
 </section>
 
 <section>
@@ -189,7 +195,7 @@
   string. CI re-validates the catalogue against its schema on every change.</p>
 </section>
 
-<section>
+<section id="export">
   <h2>Export the findings</h2>
   <p>Take the findings with you — as <strong>SARIF 2.1.0</strong> (GitHub code scanning
   and most SAST tooling ingest it) or a portable YAML/JSON list:</p>

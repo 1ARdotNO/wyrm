@@ -716,8 +716,16 @@ fn text_report(all: &[Finding]) -> String {
                 r.level, r.likelihood, r.likelihood_band, r.impact, r.impact_band,
             );
         }
+        if f.is_residual() {
+            s += "    ⚠ residual — no mitigation recorded for this serious finding\n";
+        }
     }
-    s += &format!("\n{} finding(s).\n", all.len());
+    let residual = all.iter().filter(|f| f.is_residual()).count();
+    s += &format!("\n{} finding(s)", all.len());
+    if residual > 0 {
+        s += &format!(", {residual} unmitigated (high+)");
+    }
+    s += ".\n";
     s
 }
 

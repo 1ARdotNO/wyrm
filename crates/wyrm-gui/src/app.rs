@@ -883,6 +883,10 @@ impl App {
                                 r.likelihood, r.likelihood_band, r.impact, r.impact_band,
                             ));
                         }
+                        if f.is_residual() {
+                            ui.label(RichText::new("⚠ residual").color(theme::RED).small())
+                                .on_hover_text("no mitigation recorded for this serious finding");
+                        }
                     });
                     // Click a finding → jump to its element in the tree.
                     let resp = r

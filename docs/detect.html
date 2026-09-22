@@ -61,6 +61,11 @@ wyrm analyze                        # then find the threats in the baseline</pre
     the model — so the app the pipeline actually ships is what gets analysed. A source in a
     <em>remote</em> git repo can't be followed offline: wyrm emits a note telling you to clone it
     locally and re-run, rather than silently dropping it.</p>
+    <p>Kubernetes-native <strong>controls become mitigations</strong> that downgrade findings, the
+    same way a WAF or IAP does: a default-deny <code>NetworkPolicy</code>, an Istio
+    <code>AuthorizationPolicy</code>, and STRICT mutual-TLS (<code>PeerAuthentication</code>) each
+    attach to the workloads they govern; an egress <code>NetworkPolicy</code>/<code>FQDNNetworkPolicy</code>
+    is recorded too. So a locked-down mesh no longer scores like a wide-open one.</p>
   </div>
 
   <div class="panel" style="padding:16px;margin:14px 0">

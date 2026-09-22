@@ -99,7 +99,65 @@ pub fn from_manifests(yaml: &str, project_name: &str) -> Result<Otm, crate::Erro
         }
     }
 
+    // Kubernetes/Istio-native controls become mitigations that downgrade findings —
+    // the mesh/namespace is treated as covering the workloads it governs.
+    let istio = |r: &Resource, kind: &str| {
+        r.kind.as_deref() == Some(kind)
+            && r.api_version
+                .as_deref()
+                .is_some_and(|a| a.contains("istio.io"))
+    };
+    b.set_controls(Controls {
+        mtls_strict: resources.iter().any(|r| {
+            istio(r, "PeerAuthentication")
+                && r.spec
+                    .get("mtls")
+                    .and_then(|m| m.get("mode"))
+                    .and_then(Yaml::as_str)
+                    == Some("STRICT")
+        }),
+        authz: resources.iter().any(|r| istio(r, "AuthorizationPolicy")),
+        default_deny: resources
+            .iter()
+            .any(|r| r.kind.as_deref() == Some("NetworkPolicy") && is_default_deny(&r.spec)),
+        egress: resources.iter().any(|r| {
+            matches!(
+                r.kind.as_deref(),
+                Some("FQDNNetworkPolicy") | Some("CiliumNetworkPolicy")
+            ) || (r.kind.as_deref() == Some("NetworkPolicy") && has_policy_type(&r.spec, "Egress"))
+        }),
+    });
+
     Ok(b.build(project_name))
+}
+
+/// A default-deny NetworkPolicy: selects every pod (`podSelector: {}`) and admits
+/// no ingress — the baseline that turns a namespace from allow-all to deny-all.
+fn is_default_deny(spec: &Yaml) -> bool {
+    let selects_all = spec
+        .get("podSelector")
+        .and_then(Yaml::as_mapping)
+        .is_some_and(|m| m.is_empty());
+    let no_ingress = spec
+        .get("ingress")
+        .and_then(Yaml::as_sequence)
+        .is_none_or(|s| s.is_empty());
+    selects_all && has_policy_type(spec, "Ingress") && no_ingress
+}
+
+fn has_policy_type(spec: &Yaml, t: &str) -> bool {
+    spec.get("policyTypes")
+        .and_then(Yaml::as_sequence)
+        .is_some_and(|s| s.iter().any(|v| v.as_str() == Some(t)))
+}
+
+/// Which Kubernetes/Istio-native controls the manifests declare.
+#[derive(Default)]
+struct Controls {
+    mtls_strict: bool,
+    authz: bool,
+    default_deny: bool,
+    egress: bool,
 }
 
 #[derive(Default)]
@@ -109,6 +167,7 @@ struct Builder {
     mitigations: Vec<Mitigation>,
     has_edge: bool,
     has_db: bool,
+    controls: Controls,
 }
 
 impl Builder {
@@ -130,6 +189,64 @@ impl Builder {
     }
 
     /// Link an IAP auth-gate mitigation to a service (and its ingress flow, if any).
+    fn set_controls(&mut self, c: Controls) {
+        self.controls = c;
+    }
+
+    /// Emit mitigations for the mesh/namespace-wide Kubernetes controls found, each
+    /// linked to the workloads (and, for mTLS, the internal flows) it governs.
+    fn emit_controls(&mut self, comp_ids: &[String]) {
+        let internal_flows: Vec<String> = self
+            .dataflows
+            .iter()
+            .filter(|d| d.source != EXTERNAL)
+            .map(|d| d.id.clone())
+            .collect();
+        if self.controls.default_deny {
+            self.mitigations.push(Mitigation {
+                id: "k8s-network-policy".to_string(),
+                name: "Default-deny NetworkPolicy (namespace isolation)".to_string(),
+                description: Some("A default-deny NetworkPolicy restricts pod-to-pod and ingress reachability, limiting lateral movement and unsolicited access.".to_string()),
+                risk_reduction: Some(40),
+                applies_to: comp_ids.to_vec(),
+                addresses: vec!["WYRM-T003".to_string(), "WYRM-T008".to_string()],
+            });
+        }
+        if self.controls.authz {
+            self.mitigations.push(Mitigation {
+                id: "istio-authz".to_string(),
+                name: "Istio AuthorizationPolicy (service authorization)".to_string(),
+                description: Some("Istio AuthorizationPolicy enforces request-level authorization between workloads.".to_string()),
+                risk_reduction: Some(60),
+                applies_to: comp_ids.to_vec(),
+                addresses: vec!["WYRM-T005".to_string(), "WYRM-T008".to_string()],
+            });
+        }
+        if self.controls.mtls_strict {
+            let mut applies = comp_ids.to_vec();
+            applies.extend(internal_flows);
+            self.mitigations.push(Mitigation {
+                id: "istio-mtls-strict".to_string(),
+                name: "Istio mutual TLS (STRICT)".to_string(),
+                description: Some("STRICT PeerAuthentication requires mutual TLS for all service-to-service traffic — mutually authenticated and encrypted in transit.".to_string()),
+                risk_reduction: Some(70),
+                applies_to: applies,
+                addresses: vec!["WYRM-T002".to_string(), "WYRM-T004".to_string(), "WYRM-T005".to_string()],
+            });
+        }
+        if self.controls.egress {
+            // No egress/exfiltration rule yet — record it as a documentary control.
+            self.mitigations.push(Mitigation {
+                id: "k8s-egress-policy".to_string(),
+                name: "Egress network policy (FQDN/CIDR restriction)".to_string(),
+                description: Some("Egress NetworkPolicy / FQDNNetworkPolicy restricts outbound destinations, limiting data exfiltration and command-and-control paths.".to_string()),
+                risk_reduction: None,
+                applies_to: Vec::new(),
+                addresses: Vec::new(),
+            });
+        }
+    }
+
     fn iap_gate(&mut self, service_id: &str) {
         let flow = format!("df-ingress-{service_id}");
         let mut applies_to = vec![service_id.to_string()];
@@ -297,6 +414,11 @@ impl Builder {
     }
 
     fn build(mut self, project_name: &str) -> Otm {
+        // Mesh/namespace-wide controls cover the workloads they govern — emit before
+        // moving `components` out of `self`.
+        let comp_ids: Vec<String> = self.components.keys().cloned().collect();
+        self.emit_controls(&comp_ids);
+
         let mut components: Vec<Component> = self.components.into_values().collect();
         if self.has_edge {
             components.push(external_actor());
@@ -599,5 +721,53 @@ spec:
         assert_eq!(iap.risk_reduction, Some(80));
         assert!(iap.applies_to.iter().any(|t| t == "web"));
         assert!(iap.applies_to.iter().any(|t| t == "df-ingress-web"));
+    }
+
+    #[test]
+    fn native_controls_become_linked_mitigations() {
+        let manifests = r#"
+apiVersion: v1
+kind: Service
+metadata: { name: api }
+spec: { type: LoadBalancer, ports: [{ port: 443 }] }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata: { name: mesh-mtls }
+spec: { mtls: { mode: STRICT } }
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: { name: allow-nothing }
+spec: {}
+"#;
+        let otm = from_manifests(manifests, "mesh").unwrap();
+        let mit = |id: &str| otm.mitigations.iter().find(|m| m.id == id);
+        let np = mit("k8s-network-policy").expect("default-deny NetworkPolicy mitigation");
+        assert!(np.applies_to.iter().any(|t| t == "api"));
+        assert!(np.addresses.iter().any(|r| r == "WYRM-T008"));
+        let mtls = mit("istio-mtls-strict").expect("STRICT mTLS mitigation");
+        assert_eq!(mtls.risk_reduction, Some(70));
+        assert!(mit("istio-authz").is_some());
+    }
+
+    #[test]
+    fn permissive_mtls_is_not_a_mitigation() {
+        // Only STRICT PeerAuthentication counts; PERMISSIVE must not.
+        let manifests = r#"
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata: { name: perm }
+spec: { mtls: { mode: PERMISSIVE } }
+"#;
+        let otm = from_manifests(manifests, "mesh").unwrap();
+        assert!(!otm.mitigations.iter().any(|m| m.id == "istio-mtls-strict"));
     }
 }

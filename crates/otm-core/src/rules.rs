@@ -83,6 +83,12 @@ pub enum Predicate {
     /// Component that is the source of at least `min` dataflows — a proxy for how
     /// many resources an identity can reach (access fan-out).
     AccessFanOut { min: usize },
+    /// Element records **no** control of the named family (authz, authn, hardened,
+    /// ratelimit, resilience, backup, signing, integrity, waf, logging) — checked
+    /// against its attributes/tags and any linked mitigation. Absence is only
+    /// scored at full severity when the model uses that control convention
+    /// elsewhere (see the noise floor in `analyze`); otherwise it floors to Low.
+    LacksControl { control: String },
 }
 
 /// One catalogue entry.
@@ -147,14 +153,18 @@ impl ThreatLibrary {
                 Target::Dataflow => {
                     for df in &otm.dataflows {
                         if rule.when.iter().all(|p| eval_dataflow(p, df, otm)) {
-                            findings.push(finding_for(rule, &df.id, &df.name));
+                            let mut f = finding_for(rule, &df.id, &df.name);
+                            floor_uncertain(&mut f, rule, otm);
+                            findings.push(f);
                         }
                     }
                 }
                 Target::Component => {
                     for c in &otm.components {
                         if rule.when.iter().all(|p| eval_component(p, c, otm)) {
-                            findings.push(finding_for(rule, &c.id, &c.name));
+                            let mut f = finding_for(rule, &c.id, &c.name);
+                            floor_uncertain(&mut f, rule, otm);
+                            findings.push(f);
                         }
                     }
                 }
@@ -214,6 +224,19 @@ fn apply_mitigations(findings: Vec<Finding>, otm: &Otm) -> Vec<Finding> {
     out
 }
 
+/// Noise floor for control-absence rules: if a rule asserts `lacksControl{X}` for
+/// a control the model never uses, we can't distinguish "provably absent" from
+/// "never modelled", so cap the finding at Low.
+fn floor_uncertain(f: &mut Finding, rule: &Rule, otm: &Otm) {
+    let uncertain = rule.when.iter().any(
+        |p| matches!(p, Predicate::LacksControl { control } if !model_uses_control(otm, control)),
+    );
+    if uncertain && f.severity > Severity::Low {
+        f.base_severity = Some(f.severity);
+        f.severity = Severity::Low;
+    }
+}
+
 fn finding_for(rule: &Rule, element_id: &str, element_name: &str) -> Finding {
     Finding {
         rule_id: rule.id.clone(),
@@ -247,6 +270,7 @@ fn eval_dataflow(p: &Predicate, df: &Dataflow, otm: &Otm) -> bool {
             .assets
             .iter()
             .any(|id| asset_confidentiality(otm, id) >= *min_confidentiality),
+        Predicate::LacksControl { control } => !dataflow_asserts_control(otm, df, control),
         // Component-only predicates never match a dataflow.
         Predicate::ComponentKindIn { .. }
         | Predicate::LowTrustZone { .. }
@@ -277,9 +301,66 @@ fn eval_component(p: &Predicate, c: &Component, otm: &Otm) -> bool {
         Predicate::AccessFanOut { min } => {
             otm.dataflows.iter().filter(|d| d.source == c.id).count() >= *min
         }
+        Predicate::LacksControl { control } => !component_asserts_control(otm, c, control),
         // Dataflow-only predicates never match a component.
         Predicate::CrossesTrustBoundary | Predicate::NotEncrypted => false,
     }
+}
+
+/// Alias words that count as asserting a control family — matched as a
+/// case-insensitive substring against attributes, tags, and linked mitigations.
+fn control_aliases(control: &str) -> &'static [&'static str] {
+    match control {
+        "authz" => &["authz", "authoriz", "accesscontrol", "rbac", "iap", "iam"],
+        "authn" => &["authn", "authenticat", "mfa", "2fa", "oauth", "oidc", "sso"],
+        "hardened" => &["harden", "baseline", "cis"],
+        "ratelimit" => &["ratelimit", "rate-limit", "throttl"],
+        "resilience" => &["resilien", "autoscal", "hpa", "replicas"],
+        "backup" => &["backup", "replication", "snapshot"],
+        "signing" => &["signing", "signature", "signed", "cosign", "sigstore"],
+        "integrity" => &["integrity", "checksum", "signature", "signing"],
+        "waf" => &["waf", "armor", "security-policy", "cloudflare"],
+        "logging" => &["logging", "audit", "log-sink", "flow-log"],
+        _ => &[],
+    }
+}
+
+fn hits(s: &str, aliases: &[&str]) -> bool {
+    let s = s.to_lowercase();
+    aliases.iter().any(|a| s.contains(a))
+}
+
+/// A mitigation linked to `element_id` whose id/name names the control family.
+fn mitigation_asserts(otm: &Otm, element_id: &str, aliases: &[&str]) -> bool {
+    otm.mitigations.iter().any(|m| {
+        m.applies_to.iter().any(|t| t == element_id)
+            && (hits(&m.id, aliases) || hits(&m.name, aliases))
+    })
+}
+
+fn component_asserts_control(otm: &Otm, c: &Component, control: &str) -> bool {
+    let al = control_aliases(control);
+    c.attributes.iter().any(|(k, v)| hits(k, al) || hits(v, al))
+        || mitigation_asserts(otm, &c.id, al)
+}
+
+fn dataflow_asserts_control(otm: &Otm, d: &Dataflow, control: &str) -> bool {
+    let al = control_aliases(control);
+    d.tags.iter().any(|t| hits(t, al))
+        || d.attributes.iter().any(|(k, v)| hits(k, al) || hits(v, al))
+        || mitigation_asserts(otm, &d.id, al)
+}
+
+/// Does the model use this control convention anywhere? If not, a `lacksControl`
+/// finding can't tell "provably absent" from "never modelled" — so it's floored.
+fn model_uses_control(otm: &Otm, control: &str) -> bool {
+    otm.components
+        .iter()
+        .any(|c| component_asserts_control(otm, c, control))
+        || otm
+            .dataflows
+            .iter()
+            .any(|d| dataflow_asserts_control(otm, d, control))
 }
 
 /// A flow counts as encrypted if any attribute/tag advertises transport security.
@@ -346,6 +427,27 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         }
+    }
+
+    #[test]
+    fn lacks_control_floors_when_convention_unused_else_full() {
+        // exposed_model: `api` is a web-service in the edge zone holding pii, no authz.
+        let mut otm = exposed_model();
+        let t008 = |o: &Otm| {
+            ThreatLibrary::bundled()
+                .analyze(o)
+                .into_iter()
+                .find(|f| f.rule_id == "WYRM-T008" && f.element_id == "api")
+        };
+        // Nothing in the model annotates authz → floored to Low.
+        let f = t008(&otm).expect("T008 fires on api");
+        assert_eq!(f.severity, Severity::Low);
+        assert_eq!(f.base_severity, Some(Severity::High));
+
+        // Once any element asserts authz, the convention is in use → full severity.
+        otm.components
+            .push(identity("gw", &[("authz", "oidc")], vec![]));
+        assert_eq!(t008(&otm).unwrap().severity, Severity::High);
     }
 
     #[test]

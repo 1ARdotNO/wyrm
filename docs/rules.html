@@ -115,6 +115,33 @@
   (<code>provisioning</code>, <code>privilege</code>, and its access edges via <code>flows</code>) —
   see <a href="detect.html#annotate">annotations</a>. IAM is ~99% human-supplied context;
   <code>wyrm init --exclude iam</code> keeps it out of the auto-generated baseline.</p>
+
+  <article id="WYRM-T008" class="rule">
+    <h3>WYRM-T008 <span class="pill high">high</span> <span class="stride">Elevation of Privilege</span></h3>
+    <p><strong>Internet-facing compute reachable without authorization.</strong> An
+    exposed service handling sensitive data records no authorization control — whoever
+    reaches it is trusted.</p>
+    <p class="when">Fires on a <em>component</em> when: <code>componentKindIn</code>
+    (web-service/process/api) · <code>lowTrustZone</code> ≤ 30 · <code>carriesSensitiveData</code> ≥ 40
+    · <code>lacksControl authz</code>.</p>
+    <p class="fix">↳ Put authN/Z in front (IAP, oauth2-proxy, an API gateway) and record the control.</p>
+  </article>
+
+  <article id="WYRM-T021" class="rule">
+    <h3>WYRM-T021 <span class="pill med">medium</span> <span class="stride">Repudiation</span></h3>
+    <p><strong>Sensitive cross-boundary flow without audit logging.</strong> A flow moving
+    data of note across a boundary records no logging control, so actions across it can't
+    be attributed or investigated afterward.</p>
+    <p class="when">Fires on a <em>dataflow</em> when: <code>crossesTrustBoundary</code>
+    · <code>carriesSensitiveData</code> ≥ 40 · <code>lacksControl logging</code>.</p>
+    <p class="fix">↳ Enable access/audit logging on both ends (LB logs, VPC flow logs, app audit trail).</p>
+  </article>
+  <p class="note"><strong>Control-absence noise floor:</strong> a <code>lacksControl{X}</code>
+  finding scores its full severity only when the model annotates control <code>X</code>
+  <em>somewhere</em> (proving the convention is in use). If nothing in the model asserts
+  <code>X</code>, the finding can't tell "provably absent" from "never modelled" and is
+  floored to <span class="pill" style="background:#2a3340">low</span> — so control-absence
+  rules never flood a partially-annotated model.</p>
 </section>
 
 <section>
@@ -129,6 +156,7 @@
       <tr><td><code>lowTrustZone</code></td><td>component</td><td>its zone's <code>trustRating</code> ≤ the rule's max</td></tr>
       <tr><td><code>hasTag</code></td><td>component</td><td>carries attribute <code>key</code> (present) or <code>key=value</code> (exact) — e.g. <code>provisioning=manual</code></td></tr>
       <tr><td><code>accessFanOut</code></td><td>component</td><td>is the source of at least <code>min</code> dataflows (how many resources an identity reaches)</td></tr>
+      <tr><td><code>lacksControl</code></td><td>either</td><td>records <em>no</em> control of a family (authz, authn, hardened, ratelimit, resilience, backup, signing, integrity, waf, logging) — in its attributes/tags or a linked mitigation. Floored to low unless the model uses that control elsewhere</td></tr>
     </tbody>
   </table>
 </section>

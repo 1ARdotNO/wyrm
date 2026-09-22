@@ -112,3 +112,40 @@ rules:
       a large pool of resources (5+). One compromise yields broad lateral movement,
       so this is a high-value target that concentrates blast radius.
     mitigation: Split into scoped identities per workload, grant least privilege, add workload-identity conditions and access monitoring.
+
+  - id: WYRM-T008
+    name: Internet-facing compute reachable without authorization
+    stride: ElevationOfPrivilege
+    severity: high
+    target: component
+    when:
+      - kind: componentKindIn
+        kinds: ["web-service", "process", "api"]
+      - kind: lowTrustZone
+        maxTrust: 30
+      - kind: carriesSensitiveData
+        minConfidentiality: 40
+      - kind: lacksControl
+        control: authz
+    description: >-
+      An internet-facing compute component handling sensitive data records no
+      authorization control — whoever reaches it is trusted. (Scored at full
+      severity only when the model annotates authz elsewhere; otherwise Low.)
+    mitigation: Put authN/Z in front (IAP, oauth2-proxy, an API gateway) and record the control, or tag the component's authz once present.
+
+  - id: WYRM-T021
+    name: Sensitive cross-boundary flow without audit logging
+    stride: Repudiation
+    severity: medium
+    target: dataflow
+    when:
+      - kind: crossesTrustBoundary
+      - kind: carriesSensitiveData
+        minConfidentiality: 40
+      - kind: lacksControl
+        control: logging
+    description: >-
+      A cross-boundary flow moving data of note records no audit-logging control,
+      so actions across it can't be attributed or investigated after the fact.
+      (Scored at full severity only when the model annotates logging elsewhere.)
+    mitigation: Enable access/audit logging on both ends (LB logs, VPC flow logs, app audit trail) and tag the flow's logging control.

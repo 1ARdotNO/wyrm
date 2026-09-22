@@ -39,6 +39,71 @@ pub fn from_terraform_docs<'a>(
     (b.build(project_name), skipped)
 }
 
+/// Like [`from_terraform_docs`], but each document carries a *scope* — its module
+/// directory. Any resource/module whose bare id appears in **more than one scope**
+/// is path-qualified (`envs-prod-aws_s3_bucket-logs`) so multi-module / multi-env
+/// layouts don't collide on a shared name. Ids seen in a single scope stay clean.
+pub fn from_terraform_scoped(docs: &[(String, String)], project_name: &str) -> (Otm, usize) {
+    // Pass 1: which bare ids show up under two or more distinct scopes?
+    let mut scopes_of: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
+    for (scope, text) in docs {
+        if let Ok(body) = hcl::from_str::<Body>(text) {
+            for key in resource_keys(&body) {
+                scopes_of.entry(key).or_default().insert(scope.as_str());
+            }
+        }
+    }
+    let qualify: BTreeSet<String> = scopes_of
+        .into_iter()
+        .filter(|(_, s)| s.len() > 1)
+        .map(|(k, _)| k)
+        .collect();
+
+    // Pass 2: build, qualifying only the colliding ids.
+    let mut b = Builder {
+        qualify,
+        ..Default::default()
+    };
+    let mut skipped = 0;
+    for (scope, text) in docs {
+        match hcl::from_str::<Body>(text) {
+            Ok(body) => {
+                scope.clone_into(&mut b.scope);
+                add_blocks(&mut b, &body);
+            }
+            Err(_) => skipped += 1,
+        }
+    }
+    (b.build(project_name), skipped)
+}
+
+/// The bare ids a document declares (resources and module calls), for collision
+/// detection — mirrors the id scheme in [`Builder::resource`]/[`Builder::module`].
+fn resource_keys(body: &Body) -> Vec<String> {
+    let mut keys = Vec::new();
+    for structure in body.iter() {
+        let Structure::Block(bl) = structure else {
+            continue;
+        };
+        match bl.identifier.as_str() {
+            "resource" => {
+                let rtype = bl.labels.first().map(label_str).unwrap_or_default();
+                let rname = bl.labels.get(1).map(label_str).unwrap_or_default();
+                if !rtype.is_empty() && !rname.is_empty() {
+                    keys.push(sanitize_id(&format!("{rtype}-{rname}")));
+                }
+            }
+            "module" => {
+                if let Some(name) = bl.labels.first().map(label_str).filter(|n| !n.is_empty()) {
+                    keys.push(sanitize_id(&format!("module-{name}")));
+                }
+            }
+            _ => {}
+        }
+    }
+    keys
+}
+
 fn add_blocks(b: &mut Builder, body: &Body) {
     for structure in body.iter() {
         let Structure::Block(bl) = structure else {
@@ -80,27 +145,55 @@ struct Builder {
     armor: bool,
     /// (edge component id, ingress flow id) for HTTPS edges — IAP/WAF front these.
     https_edges: Vec<(String, String)>,
+    /// Module scope (directory) of the document currently being read.
+    scope: String,
+    /// Bare resource/module ids that collide across scopes and so must be
+    /// path-qualified. Empty on the single-document / single-module path.
+    qualify: BTreeSet<String>,
 }
 
 impl Builder {
     /// A module call becomes a component; its type is inferred from name + source.
     fn module(&mut self, name: &str, source: &str) {
-        let id = sanitize_id(&format!("module-{name}"));
+        let (id, display) = self.scoped(
+            &sanitize_id(&format!("module-{name}")),
+            &format!("module.{name}"),
+        );
         let kind = module_type(name, source);
         let store = is_datastore(kind);
         self.has_db |= store;
         self.put(
             &id,
-            &format!("module.{name}"),
+            &display,
             kind,
             if store { TZ_DATA } else { TZ_INTERNAL },
         );
     }
 
     fn resource(&mut self, rtype: &str, rname: &str, attrs: Attrs) {
-        let id = sanitize_id(&format!("{rtype}-{rname}"));
-        let display = format!("{rtype}.{rname}");
+        let (id, display) = self.scoped(
+            &sanitize_id(&format!("{rtype}-{rname}")),
+            &format!("{rtype}.{rname}"),
+        );
         self.add_resource(rtype, &id, &display, rname, attrs);
+    }
+
+    /// Path-qualify an id/display when its bare id collides across module scopes,
+    /// so multi-module / multi-env layouts don't clobber one another. Non-colliding
+    /// ids (the common case) are left clean.
+    fn scoped(&self, base: &str, display: &str) -> (String, String) {
+        if !self.qualify.contains(base) {
+            return (base.to_string(), display.to_string());
+        }
+        let label = if self.scope.is_empty() {
+            "root"
+        } else {
+            self.scope.as_str()
+        };
+        (
+            sanitize_id(&format!("{label}-{base}")),
+            format!("{label}/{display}"),
+        )
     }
 
     /// Add every managed resource in a plan/state-JSON module, keyed by its full
@@ -961,5 +1054,48 @@ resource "google_compute_backend_service" "web" {
         // Linked to the HTTPS edge (component + flow), not the HTTP or VPN one.
         assert!(iap.applies_to.iter().any(|t| t.contains("https-lb")));
         assert!(!iap.applies_to.iter().any(|t| t.contains("http-lb")));
+    }
+
+    #[test]
+    fn scoped_docs_qualify_only_colliding_ids() {
+        // Same resource name in two env modules must not clobber; a name unique
+        // to one scope stays clean.
+        let prod = r#"
+resource "aws_db_instance" "main" { engine = "postgres" }
+resource "aws_s3_bucket" "prod_only" {}
+"#;
+        let dev = r#"resource "aws_db_instance" "main" { engine = "postgres" }"#;
+        let docs = vec![
+            ("envs/prod".to_string(), prod.to_string()),
+            ("envs/dev".to_string(), dev.to_string()),
+        ];
+        let (otm, skipped) = from_terraform_scoped(&docs, "cloud");
+        assert_eq!(skipped, 0);
+        let ids: Vec<&str> = otm.components.iter().map(|c| c.id.as_str()).collect();
+        // The collision is disambiguated per scope — both survive.
+        assert!(ids.contains(&"envs-prod-aws-db-instance-main"), "{ids:?}");
+        assert!(ids.contains(&"envs-dev-aws-db-instance-main"), "{ids:?}");
+        // The unique bucket keeps its clean, unqualified id.
+        assert!(ids.contains(&"aws-s3-bucket-prod-only"), "{ids:?}");
+        assert!(crate::validate::is_valid(&crate::validate(&otm)));
+    }
+
+    #[test]
+    fn scoped_docs_without_collision_stay_unqualified() {
+        // No cross-scope duplicate → ids are identical to the flat-walk output.
+        let docs = vec![
+            (
+                "net".to_string(),
+                r#"resource "aws_lb" "public" { internal = false }"#.to_string(),
+            ),
+            (
+                "data".to_string(),
+                r#"resource "aws_db_instance" "main" { engine = "postgres" }"#.to_string(),
+            ),
+        ];
+        let (otm, _) = from_terraform_scoped(&docs, "cloud");
+        let ids: Vec<&str> = otm.components.iter().map(|c| c.id.as_str()).collect();
+        assert!(ids.contains(&"aws-lb-public"), "{ids:?}");
+        assert!(ids.contains(&"aws-db-instance-main"), "{ids:?}");
     }
 }

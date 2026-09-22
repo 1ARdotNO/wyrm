@@ -75,6 +75,11 @@ wyrm init --from tfplan.json</pre>
     <p>Every resource then arrives with its module-scoped address
     (<code>module.data.google_sql_database_instance.main</code>) — modules unnested, instances
     expanded, nothing lost to name collisions. Same detection rules, exact topology.</p>
+    <p>Reading raw <code>.tf</code> without a plan still works for multi-module and multi-env
+    layouts: wyrm walks every <code>.tf</code> file and, when the same resource name appears in two
+    different module directories, <strong>path-qualifies the colliding ids</strong>
+    (<code>envs-prod-aws_db_instance-main</code> vs <code>envs-dev-…</code>) so neither is clobbered.
+    Names unique to one directory keep their clean id.</p>
   </div>
   <p>It writes <code>.threatmodel/&lt;project&gt;.otm.yaml</code>. Two principles guide
   every rule:</p>

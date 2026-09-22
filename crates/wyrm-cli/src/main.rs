@@ -426,6 +426,29 @@ fn walk_ext(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) -> Result<(), Str
     Ok(())
 }
 
+/// Terraform docs paired with their module scope — the file's directory relative
+/// to the scan root. Lets the importer path-qualify resource ids that collide
+/// across modules/envs (a flat walk alone clobbers same-named resources).
+fn tf_docs_scoped(source: &Path) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    if walk_ext(source, &["tf"], &mut files).is_err() {
+        return Vec::new();
+    }
+    files.sort();
+    files
+        .into_iter()
+        .filter_map(|f| {
+            let text = std::fs::read_to_string(&f).ok()?;
+            let scope = f
+                .parent()
+                .and_then(|p| p.strip_prefix(source).ok())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Some((scope, text))
+        })
+        .collect()
+}
+
 /// Read a file, or every matching file in a directory tree, as individual docs
 /// (so each can be parsed independently and failures isolated).
 fn collect_docs(source: &Path, exts: &[&str]) -> Result<Vec<String>, String> {
@@ -584,11 +607,12 @@ fn build_model(source: &Path, text: &str, project: &str) -> Result<otm_core::mod
         return g::from_manifests(&rendered, project).map_err(|e| e.to_string());
     }
 
-    // Collect each IaC kind present (a dir may carry both TF and k8s).
-    let tf_docs: Vec<String> = if source.is_dir() {
-        collect_docs(source, &["tf"]).unwrap_or_default()
+    // Collect each IaC kind present (a dir may carry both TF and k8s). Terraform
+    // docs keep their module scope (directory) so colliding ids can be qualified.
+    let tf_docs: Vec<(String, String)> = if source.is_dir() {
+        tf_docs_scoped(source)
     } else if looks_like_terraform(text) {
-        vec![text.to_string()]
+        vec![(String::new(), text.to_string())]
     } else {
         Vec::new()
     };
@@ -619,10 +643,10 @@ fn build_model(source: &Path, text: &str, project: &str) -> Result<otm_core::mod
         }
     }
 
-    let has_tf = tf_docs.iter().any(|d| looks_like_terraform(d));
+    let has_tf = tf_docs.iter().any(|(_, d)| looks_like_terraform(d));
 
-    let build_tf = |docs: &[String]| {
-        let (otm, skipped) = g::from_terraform_docs(docs.iter().map(String::as_str), project);
+    let build_tf = |docs: &[(String, String)]| {
+        let (otm, skipped) = g::from_terraform_scoped(docs, project);
         if skipped > 0 {
             eprintln!(
                 "note: skipped {skipped} unparseable .tf file(s) (placeholders / unsupported HCL)."

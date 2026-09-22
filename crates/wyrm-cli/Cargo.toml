@@ -18,3 +18,4 @@ path = "src/main.rs"
 otm-core = { workspace = true, features = ["terraform"] }
 clap.workspace = true
 serde_json.workspace = true
+serde_yaml_ng.workspace = true

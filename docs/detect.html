@@ -49,7 +49,19 @@ wyrm init --from main.tf -o -       # print to stdout
 wyrm init --from tfplan.json        # a Terraform plan (fully expands modules)
 wyrm init --from ./chart            # a Helm chart (rendered via `helm template`)
 wyrm init --from ./overlay          # a Kustomize overlay (rendered via kustomize)
+wyrm init --from gitops/            # ArgoCD/Flux — follows each app to its local source
 wyrm analyze                        # then find the threats in the baseline</pre>
+
+  <div class="panel" style="padding:16px;margin:14px 0">
+    <h3 style="margin-top:0">🚢 GitOps: wyrm follows ArgoCD / Flux to the workloads they deploy</h3>
+    <p>An ArgoCD <code>Application</code> or a Flux <code>Kustomization</code>/<code>HelmRelease</code>
+    is a pointer, not a workload. wyrm reads the pointer's <code>source.path</code> (Argo),
+    <code>path</code> (Flux Kustomization) or chart path (HelmRelease), resolves it against the scan
+    root, renders that local Helm chart / Kustomize overlay / manifests, and folds the workloads into
+    the model — so the app the pipeline actually ships is what gets analysed. A source in a
+    <em>remote</em> git repo can't be followed offline: wyrm emits a note telling you to clone it
+    locally and re-run, rather than silently dropping it.</p>
+  </div>
 
   <div class="panel" style="padding:16px;margin:14px 0">
     <h3 style="margin-top:0">🧩 Terraform modules: point wyrm at a plan for full resolution</h3>

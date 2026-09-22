@@ -465,6 +465,106 @@ fn render(bin: &str, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Render a local Kubernetes source directory to plain manifests: a Helm chart via
+/// `helm template`, a Kustomize overlay via `kustomize build`, else its raw YAML.
+fn render_k8s_source(dir: &Path) -> Result<String, String> {
+    if dir.join("Chart.yaml").is_file() {
+        render("helm", &["template", &dir.to_string_lossy()])
+    } else if dir.join("kustomization.yaml").is_file() || dir.join("kustomization.yml").is_file() {
+        let d = dir.to_string_lossy().into_owned();
+        render("kustomize", &["build", &d]).or_else(|_| render("kubectl", &["kustomize", &d]))
+    } else {
+        Ok(collect_docs(dir, &["yaml", "yml"])?.join("\n---\n"))
+    }
+}
+
+/// Follow GitOps pointers — ArgoCD `Application`, Flux `Kustomization`/`HelmRelease`
+/// — to the local path they deploy, render it, and return the manifests plus notes.
+/// Remote git sources can't be followed offline; those become a note, not a render.
+fn follow_gitops(root: &Path) -> (Vec<String>, Vec<String>) {
+    let mut rendered = Vec::new();
+    let mut notes = Vec::new();
+    let val =
+        |v: &serde_yaml_ng::Value, k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_owned);
+
+    for doc in collect_docs(root, &["yaml", "yml"]).unwrap_or_default() {
+        for part in doc.split("\n---") {
+            let Ok(v) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(part) else {
+                continue;
+            };
+            let api = val(&v, "apiVersion").unwrap_or_default();
+            let kind = val(&v, "kind").unwrap_or_default();
+            let Some(spec) = v.get("spec") else { continue };
+            let name = v
+                .get("metadata")
+                .and_then(|m| m.get("name"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("app");
+
+            // Collect the deploy source path(s) and whether any is a remote repo.
+            let mut paths: Vec<String> = Vec::new();
+            let mut remote = false;
+            if api.contains("argoproj.io") && kind == "Application" {
+                let mut sources = Vec::new();
+                if let Some(s) = spec.get("source") {
+                    sources.push(s);
+                }
+                if let Some(arr) = spec.get("sources").and_then(|x| x.as_sequence()) {
+                    sources.extend(arr.iter());
+                }
+                for s in sources {
+                    if let Some(p) = val(s, "path") {
+                        paths.push(p);
+                    }
+                    if val(s, "repoURL").is_some_and(|u| u.contains("://")) {
+                        remote = true;
+                    }
+                }
+            } else if api.contains("kustomize.toolkit.fluxcd.io") && kind == "Kustomization" {
+                if let Some(p) = val(spec, "path") {
+                    paths.push(p);
+                }
+            } else if api.contains("helm.toolkit.fluxcd.io") && kind == "HelmRelease" {
+                if let Some(p) = spec
+                    .get("chart")
+                    .and_then(|c| c.get("spec"))
+                    .and_then(|s| s.get("chart"))
+                    .and_then(|x| x.as_str())
+                {
+                    paths.push(p.to_owned());
+                }
+            } else {
+                continue;
+            }
+
+            let mut resolved = false;
+            for p in &paths {
+                let dir = root.join(p.trim_start_matches("./").trim_start_matches('/'));
+                if dir.is_dir() {
+                    match render_k8s_source(&dir) {
+                        Ok(m) => {
+                            rendered.push(m);
+                            resolved = true;
+                        }
+                        Err(e) => notes.push(format!("{kind} '{name}': {e}")),
+                    }
+                }
+            }
+            if !resolved {
+                notes.push(if remote {
+                    format!(
+                        "{kind} '{name}' deploys from a remote repo; clone it under {} and re-run to include its workloads.",
+                        root.display()
+                    )
+                } else {
+                    format!("{kind} '{name}' source path not found under {}; skipped.", root.display())
+                });
+            }
+        }
+    }
+    (rendered, notes)
+}
+
 fn build_model(source: &Path, text: &str, project: &str) -> Result<otm_core::model::Otm, String> {
     use otm_core::generate as g;
 
@@ -475,18 +575,13 @@ fn build_model(source: &Path, text: &str, project: &str) -> Result<otm_core::mod
 
     // Helm chart / Kustomize overlay: render to plain manifests via the tool, then
     // import the result. Keeps wyrm out of the templating business.
-    if source.is_dir() {
-        if source.join("Chart.yaml").is_file() {
-            let rendered = render("helm", &["template", &source.to_string_lossy()])?;
-            return g::from_manifests(&rendered, project).map_err(|e| e.to_string());
-        }
-        if source.join("kustomization.yaml").is_file() || source.join("kustomization.yml").is_file()
-        {
-            let dir = source.to_string_lossy().into_owned();
-            let rendered = render("kustomize", &["build", &dir])
-                .or_else(|_| render("kubectl", &["kustomize", &dir]))?;
-            return g::from_manifests(&rendered, project).map_err(|e| e.to_string());
-        }
+    if source.is_dir()
+        && (source.join("Chart.yaml").is_file()
+            || source.join("kustomization.yaml").is_file()
+            || source.join("kustomization.yml").is_file())
+    {
+        let rendered = render_k8s_source(source)?;
+        return g::from_manifests(&rendered, project).map_err(|e| e.to_string());
     }
 
     // Collect each IaC kind present (a dir may carry both TF and k8s).
@@ -497,7 +592,7 @@ fn build_model(source: &Path, text: &str, project: &str) -> Result<otm_core::mod
     } else {
         Vec::new()
     };
-    let k8s_text: Option<String> = if source.is_dir() {
+    let mut k8s_text: Option<String> = if source.is_dir() {
         let joined = collect_docs(source, &["yaml", "yml"])
             .unwrap_or_default()
             .join("\n---\n");
@@ -507,6 +602,22 @@ fn build_model(source: &Path, text: &str, project: &str) -> Result<otm_core::mod
     } else {
         None
     };
+
+    // Follow GitOps pointers (ArgoCD/Flux) to the local source they deploy and fold
+    // those workloads in — otherwise the referenced app is invisible to the model.
+    if source.is_dir() {
+        let (extra, notes) = follow_gitops(source);
+        for n in notes {
+            eprintln!("note: {n}");
+        }
+        if !extra.is_empty() {
+            let joined = extra.join("\n---\n");
+            k8s_text = Some(match k8s_text {
+                Some(base) => format!("{base}\n---\n{joined}"),
+                None => joined,
+            });
+        }
+    }
 
     let has_tf = tf_docs.iter().any(|d| looks_like_terraform(d));
 
@@ -793,4 +904,51 @@ fn is_model(path: &Path) -> bool {
         .and_then(|n| n.to_str())
         .unwrap_or_default();
     name.ends_with(".otm.yaml") || name.ends_with(".otm.yml") || name.ends_with(".otm.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Hermetic: raw-manifest sources need no external helm/kustomize binary.
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("wyrm-gitops-{}-{}", std::process::id(), name));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    fn write(path: &Path, body: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn follows_argocd_application_to_local_path() {
+        let root = scratch("argo");
+        write(
+            &root.join("app.yaml"),
+            "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata: { name: web }\nspec:\n  source: { repoURL: https://github.com/x/y.git, path: apps/web }\n",
+        );
+        write(
+            &root.join("apps/web/svc.yaml"),
+            "apiVersion: v1\nkind: Service\nmetadata: { name: frontend }\nspec: { ports: [{ port: 443 }], selector: { app: f } }\n",
+        );
+        let (rendered, notes) = follow_gitops(&root);
+        assert!(rendered.iter().any(|m| m.contains("frontend")));
+        assert!(notes.is_empty(), "local path resolved, no notes: {notes:?}");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn notes_remote_source_that_cannot_be_followed() {
+        let root = scratch("remote");
+        write(
+            &root.join("app.yaml"),
+            "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata: { name: remote }\nspec:\n  source: { repoURL: https://github.com/x/y.git, path: not/here }\n",
+        );
+        let (rendered, notes) = follow_gitops(&root);
+        assert!(rendered.is_empty());
+        assert!(notes.iter().any(|n| n.contains("remote repo")));
+        std::fs::remove_dir_all(&root).ok();
+    }
 }

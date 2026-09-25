@@ -6,7 +6,7 @@
   "publisher": "1ARdotNO",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/1ARdotNO/wyrm" },
-  "engines": { "vscode": "^1.139.0" },
+  "engines": { "vscode": "^1.139.1" },
   "categories": ["Linters", "Programming Languages"],
   "activationEvents": ["onLanguage:yaml", "workspaceContains:**/*.otm.yaml"],
   "main": "./dist/extension.js",

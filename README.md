@@ -64,6 +64,8 @@ wyrm diagram                    # Mermaid data-flow diagram
 wyrm validate                   # structural checks only
 ```
 
+The model/config directory defaults to `.threatmodel/`; override it with `--dir <path>` (on any command) or the `WYRM_DIR` env var.
+
 Re-running `wyrm init` **merges** — the topology refreshes from infra while your
 assets, mitigations, and `tls`/control tags are preserved (`--force` to overwrite).
 That's what makes the CI loop safe: regenerate on every push, keep the reviewer's

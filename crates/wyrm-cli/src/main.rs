@@ -7,9 +7,20 @@ use clap::{Parser, Subcommand, ValueEnum};
 use otm_core::rules::{Finding, Severity};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::OnceLock;
 
 /// Default in-repo location for threat models — they live with the code.
 const DEFAULT_DIR: &str = ".threatmodel";
+
+/// Resolved threat-model directory (`--dir` / `WYRM_DIR`, else `.threatmodel`),
+/// set once at startup so every path lookup honours the override.
+static DIR: OnceLock<PathBuf> = OnceLock::new();
+
+fn threatmodel_dir() -> PathBuf {
+    DIR.get()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_DIR))
+}
 
 #[derive(Parser)]
 #[command(
@@ -18,6 +29,10 @@ const DEFAULT_DIR: &str = ".threatmodel";
     about = "Threat modeling that lives with your code"
 )]
 struct Cli {
+    /// Directory holding the threat models and config (data/rules/risk/environments.yaml).
+    /// Falls back to the `WYRM_DIR` env var, then `.threatmodel`.
+    #[arg(long, global = true)]
+    dir: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -161,6 +176,12 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<ExitCode, String> {
+    // Precedence: --dir flag, then WYRM_DIR env, then the default.
+    let dir = cli
+        .dir
+        .or_else(|| std::env::var_os("WYRM_DIR").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_DIR));
+    let _ = DIR.set(dir);
     match cli.command {
         Command::Init {
             from,
@@ -269,7 +290,7 @@ fn cmd_import(
         return Ok(ExitCode::SUCCESS);
     }
     let dest = output.unwrap_or_else(|| {
-        PathBuf::from(DEFAULT_DIR).join(format!("{}.otm.yaml", sanitize_filename(&otm.project.id)))
+        threatmodel_dir().join(format!("{}.otm.yaml", sanitize_filename(&otm.project.id)))
     });
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
@@ -332,7 +353,7 @@ fn cmd_init(
 
     // Environment classifier config, shared across sources and the cross-source join.
     let env_cfg = {
-        let p = PathBuf::from(DEFAULT_DIR).join("environments.yaml");
+        let p = threatmodel_dir().join("environments.yaml");
         match std::fs::read_to_string(&p) {
             Ok(doc) => otm_core::environ::config_from_yaml(&doc)
                 .map_err(|e| format!("{}: {e}", p.display()))?,
@@ -377,7 +398,7 @@ fn cmd_init(
 
     // Enrich with human-supplied context (annotation file) before merge.
     let data_path = data.or_else(|| {
-        let p = PathBuf::from(DEFAULT_DIR).join("data.yaml");
+        let p = threatmodel_dir().join("data.yaml");
         p.is_file().then_some(p)
     });
     if let Some(path) = data_path {
@@ -388,7 +409,7 @@ fn cmd_init(
     let stdout = matches!(output.as_deref(), Some(p) if p.as_os_str() == "-");
     let dest = (!stdout).then(|| {
         output.unwrap_or_else(|| {
-            PathBuf::from(DEFAULT_DIR).join(format!("{}.otm.yaml", sanitize_filename(&project)))
+            threatmodel_dir().join(format!("{}.otm.yaml", sanitize_filename(&project)))
         })
     });
 
@@ -813,7 +834,7 @@ fn cmd_analyze(
     // Extend with a user catalogue: an explicit --rules file, else
     // .threatmodel/rules.yaml if it exists.
     let extra = rules.or_else(|| {
-        let default = PathBuf::from(DEFAULT_DIR).join(RULES_FILE);
+        let default = threatmodel_dir().join(RULES_FILE);
         default.is_file().then_some(default)
     });
     if let Some(path) = extra {
@@ -826,7 +847,7 @@ fn cmd_analyze(
 
     // OWASP Risk Rating config: org defaults from .threatmodel/risk.yaml, if any.
     let risk_cfg = {
-        let p = PathBuf::from(DEFAULT_DIR).join("risk.yaml");
+        let p = threatmodel_dir().join("risk.yaml");
         if p.is_file() {
             let t = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
             otm_core::risk::config_from_yaml(&t).map_err(|e| format!("{}: {e}", p.display()))?
@@ -974,7 +995,7 @@ fn sev_label(s: Severity) -> &'static str {
 /// paths, scan the default `.threatmodel/` directory.
 fn resolve(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let roots: Vec<PathBuf> = if paths.is_empty() {
-        vec![PathBuf::from(DEFAULT_DIR)]
+        vec![threatmodel_dir()]
     } else {
         paths.to_vec()
     };
@@ -992,7 +1013,8 @@ fn resolve(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     files.sort();
     if files.is_empty() {
         return Err(format!(
-            "no threat models found (looked for *.otm.yaml / *.otm.json under {DEFAULT_DIR}/)"
+            "no threat models found (looked for *.otm.yaml / *.otm.json under {}/)",
+            threatmodel_dir().display()
         ));
     }
     Ok(files)
